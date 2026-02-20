@@ -432,10 +432,14 @@ def train(
 
         train_metrics = train_epoch(model, train_loader, optimizer, criterion, criterion_p, device, 
                                     edge_weight=edge_weight, sector_weight=sector_weight, parent_noise_prob=parent_noise_prob)
-        val_metrics   = evaluate(model, val_loader, criterion, criterion_p, device, edge_weight=edge_weight)
-
-        train_loss = train_metrics["loss"]
-        val_loss = val_metrics["loss"]
+        
+        if val_loader is not None:
+            val_metrics = evaluate(model, val_loader, criterion, criterion_p, device, edge_weight=edge_weight)
+            val_loss = val_metrics["loss"]
+        else:
+            # If skipping validation (e.g. tar shards without explicit val split)
+            val_metrics = train_metrics
+            val_loss = train_metrics["loss"]
 
         if scheduler_type == "cosine":
             scheduler.step()
@@ -447,7 +451,7 @@ def train(
         top_confusions = []
         if epoch % log_compile_every == 0 or epoch == epochs:
             compile_rate, confusion = compute_compile_success_rate(
-                model, val_loader, device, n_batches_max=8
+                model, val_loader or train_loader, device, n_batches_max=8
             )
             # Top confusions (pred≠true, non-PAD)
             errors = {k: v for k, v in confusion.items() if k[0] != k[1]}

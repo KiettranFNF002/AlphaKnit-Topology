@@ -111,6 +111,35 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
     """Split dataset into train/val DataLoaders."""
     from torch.utils.data import DataLoader, random_split
 
+    # Check if dataset_dir is a WebDataset tar pattern
+    if ".tar" in dataset_dir or "{" in dataset_dir:
+        import webdataset as wds
+        
+        # We assume the user creates validation shards or we don't do formal validation splits here.
+        # For AlphaKnit Colab Scale-Up, training is the priority. 
+        # Here we just wrap the WebDataset into a train loader.
+        # Format: {"pc": tensor, "src": tensor, "tgt": tensor} inside the .pt
+        def extract_tensors(sample):
+            pt = sample["pt"]
+            return pt["pc"], pt["src"], pt["tgt"]
+
+        train_ds = (
+            wds.WebDataset(dataset_dir, resampled=False)
+            .shuffle(1000)
+            .decode()
+            .map(extract_tensors)
+            .batched(batch_size)
+        )
+        
+        # WebLoader handles the batched iterable
+        train_loader = wds.WebLoader(train_ds, batch_size=None, num_workers=num_workers)
+        
+        # For validation, we return None or a minimal dummy loader when using WebDataset 
+        # (user should specify validation explicitly if needed in Tar mode).
+        print(f"Loaded WebDataset shards from {dataset_dir} (Validation skipped for now)")
+        return train_loader, None
+
+    # Fallback to standard Map-Style dataset
     dataset = KnittingDataset(dataset_dir)
     n_val = max(1, int(len(dataset) * val_split))
     n_train = len(dataset) - n_val
