@@ -1,0 +1,518 @@
+"""
+Training loop for KnittingTransformer.
+
+Changes (Phase 8):
+- Label smoothing 0.1 (prevents overconfidence on dominant `sc` token)
+- Per-epoch compile_success_rate logging (true leading indicator)
+- Confusion matrix logging every N epochs (detects sc↔inc confusion)
+- Early stopping (patience=10) to avoid wasted compute
+"""
+
+import os
+import json
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+from . import config
+from .model import KnittingTransformer
+from .knitting_dataset import make_dataloaders
+
+
+# ------------------------------------------------------------------ #
+#  Training epoch                                                      #
+# ------------------------------------------------------------------ #
+
+def train_epoch(
+    model: KnittingTransformer,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,        # Type loss criterion
+    criterion_p: nn.Module,      # Parent loss criterion (ignore_index=0)
+    device: torch.device,
+    grad_clip: float = config.GRAD_CLIP,
+    edge_weight: float = 1.0,    # Phase 9B Curriculum control
+    sector_weight: float = 0.0,  # Phase 9B Curriculum control
+    parent_noise_prob: float = 0.0, # Phase 9B Stage 1 Noise
+) -> dict:
+    """Run one training epoch. Returns dict of average losses."""
+    model.train()
+    total_loss = 0.0
+    total_l_type = 0.0
+    total_l_parent = 0.0
+    total_l_deg = 0.0
+    total_l_dist = 0.0
+    
+    n_batches = 0
+
+    for point_cloud, src_tokens, tgt_tokens in loader:
+        point_cloud = point_cloud.to(device)   # (B, N, 3)
+        src_tokens  = src_tokens.to(device)    # (B, T, 3)
+        tgt_tokens  = tgt_tokens.to(device)    # (B, T, 3)
+
+        # Apply Parent Noise to src_tokens (teacher forcing sequence) if requested
+        if parent_noise_prob > 0.0:
+            B, T, _ = src_tokens.shape
+            mask = torch.rand((B, T), device=device) < parent_noise_prob
+            # Random offset between 1 and max_parent_offset (assume 200 for now)
+            rand_p1 = torch.randint(1, 200, (B, T), device=device)
+            rand_p2 = torch.randint(1, 200, (B, T), device=device)
+            src_tokens[:, :, 1] = torch.where(mask, rand_p1, src_tokens[:, :, 1])
+            src_tokens[:, :, 2] = torch.where(mask, rand_p2, src_tokens[:, :, 2])
+
+        # Phase 9B: Parent Dropout (15% masked to 0, never 2 consecutive)
+        # We only apply this after Stage 1 warmup (i.e. when edge_weight is meaningful)
+        if edge_weight > 0.1:
+            B, T, _ = src_tokens.shape
+            dropout_prob = 0.15
+            
+            # Generate random dropout mask
+            drop_mask = torch.rand((B, T), device=device) < dropout_prob
+            
+            # Remove consecutive dropouts: if mask[t] and mask[t-1] are both True, set mask[t] to False
+            # We can do this with a shifted logical AND, then XOR
+            shifted = torch.cat([torch.zeros((B, 1), dtype=torch.bool, device=device), drop_mask[:, :-1]], dim=1)
+            consecutive = drop_mask & shifted
+            drop_mask = drop_mask ^ consecutive # Flips True to False where consecutive is True
+            
+            # Apply dropout (0 is padding/unknown for parent embedding)
+            src_tokens[:, :, 1] = torch.where(drop_mask, torch.zeros_like(src_tokens[:, :, 1]), src_tokens[:, :, 1])
+            src_tokens[:, :, 2] = torch.where(drop_mask, torch.zeros_like(src_tokens[:, :, 2]), src_tokens[:, :, 2])
+
+        # Padding mask based on Type token
+        pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)  # (B, T)
+
+        optimizer.zero_grad()
+
+        # Forward
+        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+        
+        B, T, _ = tgt_tokens.shape
+        V = logits_type.shape[-1]
+        P_MAX = logits_p1.shape[-1]
+        
+        tgt_type = tgt_tokens[:, :, 0].reshape(B * T)
+        tgt_p1 = tgt_tokens[:, :, 1].reshape(B * T)
+        tgt_p2 = tgt_tokens[:, :, 2].reshape(B * T)
+
+        # 1. Node Type Loss
+        loss_type = criterion(logits_type.reshape(B * T, V), tgt_type)
+
+        # 2. Parent Loss (only active if edge_weight > 0)
+        loss_parent = 0.0
+        if edge_weight > 0:
+            l_p1 = criterion_p(logits_p1.reshape(B * T, P_MAX), tgt_p1)
+            l_p2 = criterion_p(logits_p2.reshape(B * T, P_MAX), tgt_p2)
+            loss_parent = (l_p1 + l_p2) * 0.5
+
+        # 3. Degree Consistency Loss
+        # Penalize assigning p2>0 when node type is NOT dec.
+        # mr_6, sc, inc only take 1 parent total (or 0 for mr_6).
+        # We extract the predicted probability of p2 > 0 and penalize it if true type != dec.
+        # (Using true type since decoder is teacher-forced).
+        dec_id = config.VOCAB.get('dec', 7)
+        mask_non_dec = (tgt_type != dec_id) & (tgt_type != config.PAD_ID)
+        
+        # Prob of p2 being > 0 is 1.0 - prob(p2 == 0)
+        probs_p2 = torch.softmax(logits_p2.reshape(B * T, P_MAX), dim=-1)
+        prob_p2_not_null = 1.0 - probs_p2[:, 0]
+        
+        loss_deg = 0.0
+        if mask_non_dec.any():
+            loss_deg = prob_p2_not_null[mask_non_dec].mean()
+            
+        # 4. Parent Distance Regularization (only on non-PAD)
+        # We penalize the expected value of |p|.
+        # offsets = torch.arange(P_MAX, device=device).float()
+        # expected_p1 = (torch.softmax(logits_p1, dim=-1) * offsets).sum(-1) ...
+        # Faster/Simpler: just L1 on true offset for now, or L1 on argmax?
+        # A differentiable way is expected value.
+        offsets = torch.arange(P_MAX, device=device).float().unsqueeze(0) # (1, P_MAX)
+        exp_p1 = (torch.softmax(logits_p1.reshape(B * T, P_MAX), dim=-1) * offsets).sum(-1)
+        exp_p2 = (probs_p2 * offsets).sum(-1)
+        
+        valid_mask = (tgt_type != config.PAD_ID)
+        loss_dist = 0.0
+        if valid_mask.any():
+            loss_dist = (exp_p1[valid_mask] + exp_p2[valid_mask]).mean()
+
+        # Phase 9B Total Loss Combination
+        # Weights: Type: 1.0, Edge: 0.3, Deg: 0.2, Dist: 0.01 (Chamfer will be added separately if integrated)
+        W_TYPE = 1.0
+        W_PARENT = 0.3 * edge_weight
+        W_DEG = 0.2
+        W_DIST = 0.01
+        
+        loss = (W_TYPE * loss_type) + (W_PARENT * loss_parent) + (W_DEG * loss_deg) + (W_DIST * loss_dist)
+
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        optimizer.step()
+
+        total_loss += loss.item()
+        total_l_type += loss_type.item()
+        total_l_parent += loss_parent.item() if isinstance(loss_parent, torch.Tensor) else loss_parent
+        total_l_deg += loss_deg.item() if isinstance(loss_deg, torch.Tensor) else loss_deg
+        total_l_dist += loss_dist.item() if isinstance(loss_dist, torch.Tensor) else loss_dist
+        
+        n_batches += 1
+
+    return {
+        "loss": total_loss / max(n_batches, 1),
+        "l_type": total_l_type / max(n_batches, 1),
+        "l_edge": total_l_parent / max(n_batches, 1),
+        "l_deg": total_l_deg / max(n_batches, 1),
+        "l_dist": total_l_dist / max(n_batches, 1),
+    }
+
+
+# ------------------------------------------------------------------ #
+#  Validation                                                          #
+# ------------------------------------------------------------------ #
+
+@torch.no_grad()
+def evaluate(
+    model: KnittingTransformer,
+    loader: DataLoader,
+    criterion: nn.Module,
+    criterion_p: nn.Module,
+    device: torch.device,
+    edge_weight: float = 1.0,
+) -> dict:
+    """Evaluate on a DataLoader. Returns dict of average losses."""
+    model.eval()
+    total_loss = 0.0
+    total_l_type = 0.0
+    total_l_parent = 0.0
+    total_l_deg = 0.0
+    total_l_dist = 0.0
+    n_batches = 0
+
+    for point_cloud, src_tokens, tgt_tokens in loader:
+        point_cloud = point_cloud.to(device)
+        src_tokens  = src_tokens.to(device)
+        tgt_tokens  = tgt_tokens.to(device)
+
+        pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)
+        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+
+        B, T, _ = tgt_tokens.shape
+        V = logits_type.shape[-1]
+        P_MAX = logits_p1.shape[-1]
+        
+        tgt_type = tgt_tokens[:, :, 0].reshape(B * T)
+        tgt_p1 = tgt_tokens[:, :, 1].reshape(B * T)
+        tgt_p2 = tgt_tokens[:, :, 2].reshape(B * T)
+
+        # 1. Node Type
+        loss_type = criterion(logits_type.reshape(B * T, V), tgt_type)
+
+        # 2. Parent Loss
+        loss_parent = 0.0
+        if edge_weight > 0:
+            l_p1 = criterion_p(logits_p1.reshape(B * T, P_MAX), tgt_p1)
+            l_p2 = criterion_p(logits_p2.reshape(B * T, P_MAX), tgt_p2)
+            loss_parent = (l_p1 + l_p2) * 0.5
+
+        # 3. Degree Consistency
+        dec_id = config.VOCAB.get('dec', 7)
+        mask_non_dec = (tgt_type != dec_id) & (tgt_type != config.PAD_ID)
+        
+        probs_p2 = torch.softmax(logits_p2.reshape(B * T, P_MAX), dim=-1)
+        prob_p2_not_null = 1.0 - probs_p2[:, 0]
+        
+        loss_deg = 0.0
+        if mask_non_dec.any():
+            loss_deg = prob_p2_not_null[mask_non_dec].mean()
+            
+        # 4. Distance Reg
+        offsets = torch.arange(P_MAX, device=device).float().unsqueeze(0)
+        exp_p1 = (torch.softmax(logits_p1.reshape(B * T, P_MAX), dim=-1) * offsets).sum(-1)
+        exp_p2 = (probs_p2 * offsets).sum(-1)
+        
+        valid_mask = (tgt_type != config.PAD_ID)
+        loss_dist = 0.0
+        if valid_mask.any():
+            loss_dist = (exp_p1[valid_mask] + exp_p2[valid_mask]).mean()
+
+        # Combine
+        W_TYPE = 1.0
+        W_PARENT = 0.3 * edge_weight
+        W_DEG = 0.2
+        W_DIST = 0.01
+        
+        loss = (W_TYPE * loss_type) + (W_PARENT * loss_parent) + (W_DEG * loss_deg) + (W_DIST * loss_dist)
+
+        total_loss += loss.item()
+        total_l_type += loss_type.item()
+        total_l_parent += loss_parent.item() if isinstance(loss_parent, torch.Tensor) else loss_parent
+        total_l_deg += loss_deg.item() if isinstance(loss_deg, torch.Tensor) else loss_deg
+        total_l_dist += loss_dist.item() if isinstance(loss_dist, torch.Tensor) else loss_dist
+        
+        n_batches += 1
+
+    return {
+        "loss": total_loss / max(n_batches, 1),
+        "l_type": total_l_type / max(n_batches, 1),
+        "l_edge": total_l_parent / max(n_batches, 1),
+        "l_deg": total_l_deg / max(n_batches, 1),
+        "l_dist": total_l_dist / max(n_batches, 1),
+    }
+
+
+# ------------------------------------------------------------------ #
+#  Compile success rate (per epoch signal)                             #
+# ------------------------------------------------------------------ #
+
+@torch.no_grad()
+def compute_compile_success_rate(
+    model: KnittingTransformer,
+    loader: DataLoader,
+    device: torch.device,
+    n_batches_max: int = 10,
+) -> tuple:
+    """
+    Sample n_batches_max batches and decode greedily.
+    Returns (compile_success_rate, confusion_counts).
+
+    confusion_counts: dict mapping (pred_token, true_token) → count
+    for non-PAD positions. Useful to detect sc↔inc confusion.
+    """
+    from .compiler import KnittingCompiler, CompileError
+
+    model.eval()
+    compiler = KnittingCompiler()
+
+    compile_ok = 0
+    compile_total = 0
+    confusion = {}   # (pred_id, true_id) → count
+
+    for i, (point_cloud, src_tokens, tgt_tokens) in enumerate(loader):
+        if i >= n_batches_max:
+            break
+
+        point_cloud = point_cloud.to(device)
+        src_tokens  = src_tokens.to(device)
+        tgt_tokens  = tgt_tokens.to(device)
+
+        # Greedy decode (batch)
+        pred_ids_list = model.greedy_decode(point_cloud, max_len=config.MAX_SEQ_LEN)
+
+        for b, pred_ids in enumerate(pred_ids_list):
+            # For compiler, just extract the node types to do a rough sequence validation
+            types_only = [tpl[0] if isinstance(tpl, tuple) else tpl for tpl in pred_ids]
+            tokens = [config.ID_TO_TOKEN.get(t, "<UNK>") for t in types_only]
+            try:
+                compiler.compile(tokens)
+                compile_ok += 1
+            except (CompileError, Exception):
+                pass
+            compile_total += 1
+
+            # Confusion: compare to ground truth (tgt_tokens)
+            gt_ids = tgt_tokens[b].tolist() # list of [type, p1, p2]
+            pred_seq = pred_ids[:len(gt_ids)]
+            # Pad pred to gt length
+            pad_tuple = (config.PAD_ID, 0, 0)
+            pred_seq = pred_seq + [pad_tuple] * (len(gt_ids) - len(pred_seq))
+            
+            for p, g in zip(pred_seq, gt_ids):
+                g_type = g[0]
+                if g_type == config.PAD_ID:
+                    continue
+                p_type = p[0] if isinstance(p, tuple) else p
+                key = (int(p_type), int(g_type))
+                confusion[key] = confusion.get(key, 0) + 1
+
+    rate = compile_ok / max(compile_total, 1)
+    return rate, confusion
+
+
+# ------------------------------------------------------------------ #
+#  Main training function                                              #
+# ------------------------------------------------------------------ #
+
+def train(
+    dataset_dir: str = "data/processed/dataset",
+    checkpoint_dir: str = config.CHECKPOINT_DIR,
+    epochs: int = config.EPOCHS,
+    batch_size: int = config.BATCH_SIZE,
+    lr: float = config.LR,
+    device_str: str = "auto",
+    val_split: float = 0.1,
+    d_model: int = config.D_MODEL,
+    n_heads: int = config.N_HEADS,
+    n_layers: int = config.N_LAYERS,
+    ffn_dim: int = config.FFN_DIM,
+    scheduler_type: str = "cosine",   # 'cosine' or 'plateau'
+    run_name: str = "default",
+    label_smoothing: float = 0.1,     # Phase 8: prevents sc dominance
+    early_stop_patience: int = 10,    # Phase 8: stop if no improvement
+    log_compile_every: int = 5,       # Phase 8: compile rate every N epochs
+    resume_checkpoint: str = None,    # Phase 8: resume from checkpoint
+):
+    """Full training loop with checkpointing."""
+
+    # Device
+    if device_str == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(device_str)
+    print(f"Training on: {device}")
+
+    # Data
+    train_loader, val_loader = make_dataloaders(
+        dataset_dir, val_split=val_split, batch_size=batch_size
+    )
+    print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
+
+    # Model
+    model = KnittingTransformer(
+        d_model=d_model,
+        n_heads=n_heads,
+        n_layers=n_layers,
+        ffn_dim=ffn_dim,
+    ).to(device)
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model parameters: {n_params:,}")
+
+    # Optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    start_epoch = 1
+    best_val_loss = float("inf")
+    history = []
+
+    # Resume from checkpoint
+    if resume_checkpoint and os.path.exists(resume_checkpoint):
+        ckpt = torch.load(resume_checkpoint, map_location=device, weights_only=True)
+        model.load_state_dict(ckpt["model_state"])
+        optimizer.load_state_dict(ckpt["optimizer_state"])
+        start_epoch = ckpt.get("epoch", 0) + 1
+        best_val_loss = ckpt.get("val_loss", float("inf"))
+        print(f"Resumed from epoch {start_epoch - 1} (val_loss={best_val_loss:.4f})")
+        # Load existing history if available
+        hist_path = os.path.join(checkpoint_dir, f"training_history_{run_name}.json")
+        if os.path.exists(hist_path):
+            with open(hist_path) as f:
+                history = json.load(f)
+
+    # Scheduler (based on remaining epochs)
+    remaining = epochs - start_epoch + 1
+    if scheduler_type == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(remaining, 1), eta_min=lr * 0.01
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, patience=3, factor=0.5
+        )
+
+    # Phase 8: label smoothing — prevents overconfidence on sc
+    criterion = nn.CrossEntropyLoss(
+        ignore_index=config.PAD_ID,
+        label_smoothing=label_smoothing,
+    )
+    
+    # Phase 9B: Parent prediction loss (ignore 0 offset / PAD)
+    criterion_p = nn.CrossEntropyLoss(ignore_index=0)
+
+    import math
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    no_improve = 0  # early stopping counter
+
+    for epoch in range(start_epoch, epochs + 1):
+        # Phase 9B Training Curriculum
+        # Sigmoid transition for edge weight centered at epoch 5
+        edge_weight = 1.0 / (1.0 + math.exp(-(epoch - 6) / 1.5))
+        # Sector loss activates late (epoch 12)
+        sector_weight = 1.0 / (1.0 + math.exp(-(epoch - 14) / 2.0))
+        # 5% parent noise during Stage 1 (Epoch 0-5)
+        parent_noise_prob = 0.05 if epoch <= 5 else 0.0
+
+        train_metrics = train_epoch(model, train_loader, optimizer, criterion, criterion_p, device, 
+                                    edge_weight=edge_weight, sector_weight=sector_weight, parent_noise_prob=parent_noise_prob)
+        val_metrics   = evaluate(model, val_loader, criterion, criterion_p, device, edge_weight=edge_weight)
+
+        train_loss = train_metrics["loss"]
+        val_loss = val_metrics["loss"]
+
+        if scheduler_type == "cosine":
+            scheduler.step()
+        else:
+            scheduler.step(val_loss)
+
+        # Phase 8: compile success rate (every N epochs or last epoch)
+        compile_rate = None
+        top_confusions = []
+        if epoch % log_compile_every == 0 or epoch == epochs:
+            compile_rate, confusion = compute_compile_success_rate(
+                model, val_loader, device, n_batches_max=8
+            )
+            # Top confusions (pred≠true, non-PAD)
+            errors = {k: v for k, v in confusion.items() if k[0] != k[1]}
+            top_confusions = sorted(errors.items(), key=lambda x: -x[1])[:5]
+            top_confusions_readable = [
+                {
+                    "pred": config.ID_TO_TOKEN.get(p, str(p)),
+                    "true": config.ID_TO_TOKEN.get(g, str(g)),
+                    "count": cnt,
+                }
+                for (p, g), cnt in top_confusions
+            ]
+        else:
+            top_confusions_readable = []
+
+        row = {
+            "epoch": epoch,
+            "train_loss": round(train_metrics["loss"], 4),
+            "train_l_type": round(train_metrics["l_type"], 4),
+            "train_l_edge": round(train_metrics["l_edge"], 4),
+            "train_l_deg": round(train_metrics["l_deg"], 4),
+            "val_loss": round(val_metrics["loss"], 4),
+            "edge_weight": round(edge_weight, 3),
+        }
+        if compile_rate is not None:
+            row["compile_success_rate"] = round(compile_rate, 4)
+        if top_confusions_readable:
+            row["top_confusions"] = top_confusions_readable
+
+        history.append(row)
+
+        # Console log
+        cr_str = f" | compile={compile_rate*100:.1f}%" if compile_rate is not None else ""
+        print(f"Epoch {epoch:3d}/{epochs} | train={train_loss:.4f} (ty={train_metrics['l_type']:.2f}, ed={train_metrics['l_edge']:.2f}) | val={val_loss:.4f}{cr_str}")
+
+        # Save best checkpoint
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            no_improve = 0
+            ckpt_path = os.path.join(checkpoint_dir, f"best_model_{run_name}.pt")
+            torch.save({
+                "epoch": epoch,
+                "model_state": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "val_loss": val_loss,
+                "config": {
+                    "d_model": d_model, "n_heads": n_heads,
+                    "n_layers": n_layers, "ffn_dim": ffn_dim,
+                },
+            }, ckpt_path)
+        else:
+            no_improve += 1
+            if no_improve >= early_stop_patience:
+                print(f"\nEarly stopping at epoch {epoch} (no improvement for {early_stop_patience} epochs)")
+                break
+
+    # Save history
+    history_path = os.path.join(checkpoint_dir, f"training_history_{run_name}.json")
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)
+
+    print(f"\nBest val loss: {best_val_loss:.4f}")
+    print(f"Checkpoint: {checkpoint_dir}/best_model_{run_name}.pt")
+    return history
+
+
+if __name__ == "__main__":
+    train()
