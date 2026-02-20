@@ -124,7 +124,7 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
             return pt["pc"], pt["src"], pt["tgt"]
 
         train_ds = (
-            wds.WebDataset(dataset_dir, resampled=False)
+            wds.WebDataset(dataset_dir, resampled=False, shardshuffle=True)
             .shuffle(1000)
             .decode()
             .map(extract_tensors)
