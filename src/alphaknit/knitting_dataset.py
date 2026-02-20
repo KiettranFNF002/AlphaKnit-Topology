@@ -115,19 +115,24 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
     if ".tar" in dataset_dir or "{" in dataset_dir:
         import webdataset as wds
         
+        import io
+        
         # We assume the user creates validation shards or we don't do formal validation splits here.
         # For AlphaKnit Colab Scale-Up, training is the priority. 
         # Here we just wrap the WebDataset into a train loader.
         # Format: {"pc": tensor, "src": tensor, "tgt": tensor} inside the .pt
-        def extract_tensors(sample):
-            pt = sample["pt"]
-            return pt["pc"], pt["src"], pt["tgt"]
+        
+        def decode_and_extract(sample):
+            # sample['pt'] is raw bytes from the tar archive
+            pt_bytes = sample["pt"]
+            # Decode bytes into the PyTorch dict we originally saved
+            pt_dict = torch.load(io.BytesIO(pt_bytes), map_location="cpu", weights_only=False)
+            return pt_dict["pc"], pt_dict["src"], pt_dict["tgt"]
 
         train_ds = (
             wds.WebDataset(dataset_dir, resampled=False, shardshuffle=True)
             .shuffle(1000)
-            .decode("torch")
-            .map(extract_tensors)
+            .map(decode_and_extract)
             .batched(batch_size)
         )
         
