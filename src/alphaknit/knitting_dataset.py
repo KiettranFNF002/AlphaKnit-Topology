@@ -126,7 +126,7 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
         train_ds = (
             wds.WebDataset(dataset_dir, resampled=False, shardshuffle=True)
             .shuffle(1000)
-            .decode()
+            .decode("torch")
             .map(extract_tensors)
             .batched(batch_size)
         )
