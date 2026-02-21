@@ -63,3 +63,4 @@ This tracks **Phase Lag**, **Rank Stability**, and **Structural Margin** in real
 ---
 **Status**: Research Mode (Phase 11: Scientific Falsification)
 **License**: MIT
+**Build**: v6.6-F-impl-1 (Causal Hooks Integrated)

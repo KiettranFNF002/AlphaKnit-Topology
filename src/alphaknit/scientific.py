@@ -73,17 +73,18 @@ class InterventionEngine:
 
     def hook_fn(self, module, input, output):
         """The actual perturbation logic."""
-        # Note: In PyTorch hooks, 'output' is what the module just computed
-        with torch.no_grad():
-            if isinstance(output, tuple):
-                # Transformer layers often return (hidden_states, attention_weights)
-                h = output[0]
+        # We compute noise without grad, but the addition must happen in-graph
+        # to allow backprop to flow through the layer's inputs.
+        if isinstance(output, tuple):
+            h = output[0]
+            with torch.no_grad():
                 noise = torch.randn_like(h) * (h.std() + 1e-6) * 0.1
-                perturbed = h + noise
-                return (perturbed, *output[1:])
-            else:
+            perturbed = h + noise
+            return (perturbed, *output[1:])
+        else:
+            with torch.no_grad():
                 noise = torch.randn_like(output) * (output.std() + 1e-6) * 0.1
-                return output + noise
+            return output + noise
 
 
 class HypothesisEngine:
