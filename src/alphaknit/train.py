@@ -35,6 +35,7 @@ def train_epoch(
     sector_weight: float = 0.0,  # Phase 9B Curriculum control
     parent_noise_prob: float = 0.0, # Phase 9B Stage 1 Noise
     grad_accum_steps: int = 1,
+    prev_epoch_probs: dict = None, # Phase 10: Store previous probabilities for PDI
 ) -> dict:
     """Run one training epoch. Returns dict of average losses."""
     model.train()
@@ -143,6 +144,34 @@ def train_epoch(
         loss_dist = 0.0
         if valid_mask.any():
             loss_dist = (exp_p1[valid_mask] + exp_p2[valid_mask]).mean()
+            
+        # 4.5 Parent Decision Instability (PDI) - Emergence Seismograph
+        # We compute PDI without temperature sharpening to get the "true" model confidence shift
+        probs_p1_raw = torch.softmax(logits_p1.reshape(B * T, P_MAX), dim=-1).detach()
+        probs_p2_raw = torch.softmax(logits_p2.reshape(B * T, P_MAX), dim=-1).detach()
+        
+        # We need a stable identifier for each node to track across epochs. 
+        # Using the batch index is not stable due to shuffling. 
+        # For simplicity, since the dataset is fixed size, we can just track the average 
+        # probability shift across the entire epoch, rather than matching node-for-node.
+        # Actually, since dataloader shuffles, we can't do exact node-to-node matching easily without global IDs.
+        # But we CAN compute PDI by storing the moving average of the probability field 
+        # or we just compute the running stats.
+        # Since ChatGPT suggested P_t - P_{t-1}, the easiest proxy without global IDs is to 
+        # compute the shift in the *average* parent probability distribution for each offset.
+        # Or even simpler: we just store the global histogram of parent offsets and compare them.
+        
+        # Better approach proposed for PDI without Node IDs: 
+        # Compute the absolute change in the mean probability vector across the epoch.
+        mean_prob_p1 = probs_p1_raw.mean(dim=0)
+        mean_prob_p2 = probs_p2_raw.mean(dim=0)
+        
+        if not hasattr(train_epoch, "epoch_prob_p1_acc"):
+            train_epoch.epoch_prob_p1_acc = torch.zeros(P_MAX, device=device)
+            train_epoch.epoch_prob_p2_acc = torch.zeros(P_MAX, device=device)
+            
+        train_epoch.epoch_prob_p1_acc += mean_prob_p1
+        train_epoch.epoch_prob_p2_acc += mean_prob_p2
             
         # 5. Topology Tension Signal (Phase 10.5)
         loss_tension = torch.tensor(0.0, device=device)
@@ -269,10 +298,14 @@ def train_epoch(
         "l_dist": total_l_dist / max(n_batches, 1),
         "entropy": train_epoch.total_entropy / max(n_batches, 1),
         "tension": train_epoch.total_tension / max(n_batches, 1),
+        "mean_p1_prob": train_epoch.epoch_prob_p1_acc / max(n_batches, 1),
+        "mean_p2_prob": train_epoch.epoch_prob_p2_acc / max(n_batches, 1),
     }
     # Reset tracking variable
     train_epoch.total_entropy = 0.0
     train_epoch.total_tension = 0.0
+    train_epoch.epoch_prob_p1_acc = torch.zeros(P_MAX, device=device)
+    train_epoch.epoch_prob_p2_acc = torch.zeros(P_MAX, device=device)
     return ret
 
 
@@ -557,6 +590,8 @@ def train(
     import math
     os.makedirs(checkpoint_dir, exist_ok=True)
     no_improve = 0  # early stopping counter
+    
+    prev_epoch_probs = None
 
     for epoch in range(start_epoch, epochs + 1):
         # Phase 10 Training Curriculum
@@ -569,7 +604,21 @@ def train(
 
         train_metrics = train_epoch(model, train_loader, optimizer, criterion, criterion_p, device, 
                                     edge_weight=edge_weight, sector_weight=sector_weight, 
-                                    parent_noise_prob=parent_noise_prob, grad_accum_steps=grad_accum_steps)
+                                    parent_noise_prob=parent_noise_prob, grad_accum_steps=grad_accum_steps,
+                                    prev_epoch_probs=prev_epoch_probs)
+                                    
+        # Calculate PDI (Parent Decision Instability)
+        pdi = 0.0
+        if prev_epoch_probs is not None:
+            pdi_p1 = (train_metrics["mean_p1_prob"] - prev_epoch_probs["p1"]).abs().mean().item()
+            pdi_p2 = (train_metrics["mean_p2_prob"] - prev_epoch_probs["p2"]).abs().mean().item()
+            pdi = (pdi_p1 + pdi_p2) / 2.0
+            train_metrics["pdi"] = pdi
+            
+        prev_epoch_probs = {
+            "p1": train_metrics["mean_p1_prob"].clone(),
+            "p2": train_metrics["mean_p2_prob"].clone()
+        }
         
         if val_loader is not None:
             # We must evaluate with edge_weight=1.0 so that the validation loss is a STATIC, absolute metric.
@@ -619,6 +668,7 @@ def train(
             "train_l_deg": round(train_metrics["l_deg"], 4),
             "train_entropy": round(train_metrics.get("entropy", 0.0), 3),
             "train_tension": round(train_metrics.get("tension", 0.0), 4),
+            "train_pdi": round(train_metrics.get("pdi", 0.0), 4),
             "val_loss": round(val_metrics["loss"], 4),
             "edge_weight": round(edge_weight, 3),
         }
@@ -631,7 +681,7 @@ def train(
 
         # Console log
         cr_str = f" | compile={compile_rate*100:.1f}%" if compile_rate is not None else ""
-        ent_tension_str = f", ent={train_metrics.get('entropy', 0.0):.2f}, ts={train_metrics.get('tension', 0.0):.3f}"
+        ent_tension_str = f", ent={train_metrics.get('entropy', 0.0):.2f}, ts={train_metrics.get('tension', 0.0):.3f}, pdi={train_metrics.get('pdi', 0.0):.3f}"
         print(f"Epoch {epoch:3d}/{epochs} | train={train_metrics['loss']:.4f} (ty={train_metrics['l_type']:.2f}, ed={train_metrics['l_edge']:.2f}{ent_tension_str}) | val={val_loss:.4f}{cr_str}")
 
         # Save best checkpoint
