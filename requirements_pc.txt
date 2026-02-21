@@ -1,0 +1,8 @@
+torch
+torchvision
+torchaudio
+numpy
+webdataset
+trimesh
+networkx
+matplotlib
