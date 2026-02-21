@@ -15,10 +15,10 @@ import pytest
 import torch
 import tempfile
 
-from src.alphaknit import config
-from src.alphaknit.model import PointNetEncoder, KnittingTransformer
-from src.alphaknit.knitting_dataset import KnittingDataset, make_dataloaders
-from src.alphaknit.train import train_epoch, evaluate
+from alphaknit import config
+from alphaknit.model import PointNetEncoder, KnittingTransformer
+from alphaknit.knitting_dataset import KnittingDataset, make_dataloaders
+from alphaknit.train import train_epoch, evaluate
 
 
 # ------------------------------------------------------------------ #
@@ -28,7 +28,7 @@ from src.alphaknit.train import train_epoch, evaluate
 @pytest.fixture
 def small_dataset(tmp_path):
     """Create a tiny synthetic dataset (10 samples) for testing."""
-    from src.alphaknit.dataset_builder import DatasetBuilder
+    from alphaknit.dataset_builder import DatasetBuilder
     builder = DatasetBuilder(output_dir=str(tmp_path), min_rows=3, max_rows=5)
     builder.build(n_samples=10, verbose=False)
     return str(tmp_path)
@@ -80,16 +80,19 @@ class TestKnittingTransformer:
     def test_forward_shape(self, model):
         B, N, T = 2, 64, 10
         pc = torch.randn(B, N, 3)
-        tokens = torch.randint(0, config.VOCAB_SIZE, (B, T))
-        logits = model(pc, tokens)
-        assert logits.shape == (B, T, config.VOCAB_SIZE), \
-            f"Expected ({B}, {T}, {config.VOCAB_SIZE}), got {logits.shape}"
+        tokens = torch.randint(0, config.VOCAB_SIZE, (B, T, 3)) # (B, T, 3) for v6.6-F
+        logits_type, logits_p1, logits_p2 = model(pc, tokens)
+        assert logits_type.shape == (B, T, config.VOCAB_SIZE), \
+            f"Expected type ({B}, {T}, {config.VOCAB_SIZE}), got {logits_type.shape}"
+        assert logits_p1.shape == (B, T, 200), f"Expected p1 ({B}, {T}, 200), got {logits_p1.shape}"
 
     def test_forward_finite(self, model):
         pc = torch.randn(2, 64, 3)
-        tokens = torch.randint(0, config.VOCAB_SIZE, (2, 8))
-        logits = model(pc, tokens)
-        assert torch.all(torch.isfinite(logits))
+        tokens = torch.randint(0, config.VOCAB_SIZE, (2, 8, 3))
+        logits_type, l1, l2 = model(pc, tokens)
+        assert torch.all(torch.isfinite(logits_type))
+        assert torch.all(torch.isfinite(l1))
+        assert torch.all(torch.isfinite(l2))
 
     def test_greedy_decode_format(self):
         torch.manual_seed(0)
@@ -98,8 +101,8 @@ class TestKnittingTransformer:
         results = model.greedy_decode(pc, max_len=20)
         assert len(results) == 1
         assert isinstance(results[0], list)
-        # Just check it returns a list of ints
-        assert all(isinstance(x, int) for x in results[0])
+        # v6.6-F returns list of (type, p1, p2) tuples
+        assert all(isinstance(x, tuple) and len(x) == 3 for x in results[0])
 
     def test_ids_to_tokens(self, model):
         ids = [config.VOCAB["mr_6"], config.VOCAB["sc"], config.VOCAB["inc"]]
@@ -121,8 +124,8 @@ class TestKnittingDataset:
         ds = KnittingDataset(small_dataset, n_points=64, max_seq_len=50)
         pc, src, tgt = ds[0]
         assert pc.shape == (64, 3), f"pc shape: {pc.shape}"
-        assert src.shape == (50,), f"src shape: {src.shape}"
-        assert tgt.shape == (50,), f"tgt shape: {tgt.shape}"
+        assert src.shape == (50, 3), f"src shape: {src.shape}"
+        assert tgt.shape == (50, 3), f"tgt shape: {tgt.shape}"
 
     def test_item_dtypes(self, small_dataset):
         ds = KnittingDataset(small_dataset, n_points=64, max_seq_len=50)
@@ -134,7 +137,7 @@ class TestKnittingDataset:
     def test_starts_with_sos(self, small_dataset):
         ds = KnittingDataset(small_dataset, n_points=64, max_seq_len=50)
         _, src, _ = ds[0]
-        assert src[0].item() == config.SOS_ID
+        assert src[0, 0].item() == config.SOS_ID
 
     def test_make_dataloaders(self, small_dataset):
         train_loader, val_loader = make_dataloaders(
@@ -157,9 +160,11 @@ class TestTraining:
         )
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         criterion = torch.nn.CrossEntropyLoss(ignore_index=config.PAD_ID)
-        loss = train_epoch(model, train_loader, optimizer, criterion, device)
-        assert isinstance(loss, float)
-        assert loss > 0
+        criterion_p = torch.nn.CrossEntropyLoss(ignore_index=0)
+        metrics = train_epoch(model, train_loader, optimizer, criterion, criterion_p, device)
+        assert isinstance(metrics, dict)
+        assert "loss" in metrics
+        assert metrics["loss"] > 0
 
     def test_loss_decreases(self, small_dataset, device):
         """Loss should decrease over 8 epochs on a small dataset."""
@@ -172,9 +177,10 @@ class TestTraining:
         criterion = torch.nn.CrossEntropyLoss(ignore_index=config.PAD_ID)
 
         losses = []
+        criterion_p = torch.nn.CrossEntropyLoss(ignore_index=0)
         for _ in range(8):
-            loss = train_epoch(model, train_loader, optimizer, criterion, device)
-            losses.append(loss)
+            metrics = train_epoch(model, train_loader, optimizer, criterion, criterion_p, device)
+            losses.append(metrics["loss"])
 
         # Min loss should be lower than first epoch (robust to non-monotonic decrease)
         assert min(losses) < losses[0], \

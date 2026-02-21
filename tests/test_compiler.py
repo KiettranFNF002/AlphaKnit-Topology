@@ -1,8 +1,8 @@
 import pytest
-from src.alphaknit.stitch_graph import StitchGraph, StitchNode
-from src.alphaknit.compiler import KnittingCompiler, CompileError
-from src.alphaknit.validator import GraphValidator
-from src.alphaknit.canonicalizer import canonicalize_row, canonicalize_pattern
+from alphaknit.stitch_graph import StitchGraph, StitchNode
+from alphaknit.compiler import KnittingCompiler, CompileError
+from alphaknit.validator import GraphValidator
+from alphaknit.canonicalizer import canonicalize_row, canonicalize_pattern
 
 
 # ============================================================

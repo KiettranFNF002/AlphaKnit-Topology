@@ -22,20 +22,14 @@ checkpoints/
 *.pkl
 *.csv
 dataset_*/
-<<<<<<< HEAD
 *.obj
 test_output.txt
-=======
->>>>>>> 6715203057079fa13e1fd3855c710092996e127c
 
 # Các file logs
 logs/
 *.log
-<<<<<<< HEAD
 
 # Assistant/Agent specific
 external_skills/
 .agent/
 .gemini/
-=======
->>>>>>> 6715203057079fa13e1fd3855c710092996e127c

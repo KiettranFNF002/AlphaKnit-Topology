@@ -98,9 +98,9 @@ echo [FATAL] Training process crashed or interrupted.
 pause
 exit /b 1
 
-:END
 echo.
 echo ==============================================
 echo  ALPHA-KNIT v6.6-F DISCOVERY COMPLETE! 🚀
+echo  Status: Phase 11 Verified
 echo ==============================================
 pause

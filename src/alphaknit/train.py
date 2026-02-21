@@ -1,11 +1,10 @@
 """
 Training loop for KnittingTransformer.
 
-AlphaKnit v6.1: Stabilization & Research Hygiene
-- Resolves merge conflict SyntaxErrors.
-- Implements Observer Purity (Passive Bias).
-- Enhances PhaseDetector with Hysteresis.
-- Ensures VRAM safety in latent capture.
+AlphaKnit v6.6-F: Scientific Falsification & Discovery
+- Implements the Blind Discovery Engine for topological causal analysis.
+- Phase 11: Scientific Falsification transition logic.
+- Ensures VRAM safety in latent capture and observer decoupling.
 """
 
 import os
@@ -64,7 +63,7 @@ def apply_selective_optimizer_reset(model, lr_encoder, lr_decoder, scheduler_typ
     else:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5)
 
-    print(f"🔄 v4.0 SELECTIVE RESET COMPLETE:")
+    print(f"🔄 v6.6-F SELECTIVE RESET COMPLETE:")
     print(f"   -> Encoder: {len(encoder_params)} params groups (LR={lr_encoder})")
     print(f"   -> Decoder/Tension: {len(decoder_params)} params groups (Shock LR={lr_decoder})")
     print(f"   -> Optimizer & Scheduler re-instantiated (Curvature memory cleared).")
@@ -627,9 +626,9 @@ def train(
     resume_checkpoint: str = None,    # Phase 8: resume from checkpoint
     num_workers: int = 2,             # Phase 10: dataloader multiprocessing
     grad_accum_steps: int = 4,        # Phase 10: gradient accumulation for T4 VRAM
-    reset_optimizer: bool = False,    # v4.0: Phase transition reset
-    resume_auto: bool = False,        # v5.0: Pick up latest epoch checkpoint
-    force_phase2: bool = False,       # v5.0: Force Airlock transition
+    reset_optimizer: bool = False,    # v6.6-F: Phase transition reset
+    resume_auto: bool = False,        # v6.6-F: Pick up latest epoch checkpoint
+    force_phase2: bool = False,       # v6.6-F: Force Airlock transition
 ):
     """Full training loop with checkpointing."""
 

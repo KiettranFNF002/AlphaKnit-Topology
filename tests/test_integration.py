@@ -4,10 +4,10 @@ Integration tests: full pipeline
   generator → compile → validate
 """
 import pytest
-from src.alphaknit.compiler import KnittingCompiler
-from src.alphaknit.validator import GraphValidator
-from src.alphaknit.canonicalizer import canonicalize_pattern
-from src.alphaknit.generator import AmigurumiGenerator
+from alphaknit.compiler import KnittingCompiler
+from alphaknit.validator import GraphValidator
+from alphaknit.canonicalizer import canonicalize_pattern
+from alphaknit.generator import AmigurumiGenerator
 
 
 COMPILER = KnittingCompiler()
