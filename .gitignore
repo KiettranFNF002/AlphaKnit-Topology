@@ -1,0 +1,35 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+bin/
+lib/
+Include/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Dữ liệu nặng & Checkpoints (AlphaKnit specific)
+data/
+checkpoints/
+*.pt
+*.npy
+*.pkl
+*.csv
+dataset_*/
+*.obj
+test_output.txt
+
+# Các file logs
+logs/
+*.log
+
+# Assistant/Agent specific
+external_skills/
+.agent/
+.gemini/
