@@ -91,11 +91,11 @@ class HypothesisEngine:
     """
     v6.6-F: Causal Falsification Engine.
     Automates the "Discovery" process by verifying persistence and invariance.
+    v6.6-F Level 2: Grounded in Optimizer Path Length (Energy) instead of Epoch count.
     """
-    def __init__(self, n_seeds_target=5):
+    def __init__(self, persistence_threshold=5.0):
         self.hypotheses = []
-        self.n_seeds_target = n_seeds_target
-        self.persistence_window = 3
+        self.persistence_threshold = persistence_threshold # Cumulative ||delta theta||
         self.causal_confidence = {}
 
     def propose(self, name, description, condition_fn):
@@ -103,18 +103,17 @@ class HypothesisEngine:
             "name": name,
             "desc": description,
             "condition": condition_fn,
-            "streak": 0,
+            "path_traveled": 0.0,
             "status": "PROPOSED",
             "history": []
         })
 
-    def update(self, metrics, epoch):
+    def update(self, metrics, delta_dist):
+        """
+        delta_dist: Optimizer distance traveled in this interval.
+        """
         report = []
         for h in self.hypotheses:
-            # Type-safe streak access
-            streak_raw = h.get("streak", 0)
-            streak = int(streak_raw) if isinstance(streak_raw, (int, float)) else 0
-            
             condition_fn = h.get("condition")
             is_met = False
             if callable(condition_fn):
@@ -124,19 +123,20 @@ class HypothesisEngine:
                     is_met = False
 
             if is_met:
-                streak += 1
-                if streak >= self.persistence_window:
+                h["path_traveled"] += delta_dist
+                if h["path_traveled"] >= self.persistence_threshold:
+                    if h["status"] != "VERIFIED":
+                         print(f"✨ VERIFIED: Discovery '{h['name']}' met persistence threshold ({h['path_traveled']:.2f}/{self.persistence_threshold:.2f})")
                     h["status"] = "VERIFIED"
             else:
                 if h["status"] == "VERIFIED":
-                    print(f"🔴 FALSIFIED: Discovery '{h['name']}' failed persistence check at epoch {epoch}.")
+                    print(f"🔴 FALSIFIED: Discovery '{h['name']}' failed at distance {h['path_traveled']:.4f}.")
                     h["status"] = "FALSIFIED"
-                streak = 0
+                h["path_traveled"] = 0.0
             
-            h["streak"] = streak
             h["history"].append(h["status"])
             name = str(h.get("name", "Unknown"))
-            report.append(f"{name}: {h['status']} ({streak}/{self.persistence_window})")
+            report.append(f"{name}: {h['status']} ({h['path_traveled']:.2f}/{self.persistence_threshold:.2f})")
         
         return report
 

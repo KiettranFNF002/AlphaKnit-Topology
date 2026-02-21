@@ -60,22 +60,21 @@ def test_null_emergence_suite():
     assert not torch.allclose(points_orig, transformed['point_cloud']), "Noise inputs should perturb points"
 
 def test_hypothesis_engine_persistence():
-    engine = HypothesisEngine(n_seeds_target=1)
+    # v6.6-F Level 2: Grounded in distance
+    engine = HypothesisEngine(persistence_threshold=1.5)
     engine.propose("Test_Hypo", "Description", lambda m: m["acc"] > 0.8)
     
-    # Epoch 1: Met
-    engine.update({"acc": 0.9}, 1)
+    # Distance 1.0: Met but not threshold (1.5)
+    engine.update({"acc": 0.9}, 1.0)
     assert engine.hypotheses[0]["status"] == "PROPOSED"
-    assert engine.hypotheses[0]["streak"] == 1
+    assert engine.hypotheses[0]["path_traveled"] == 1.0
     
-    # Epoch 2: Met
-    engine.update({"acc": 0.9}, 2)
-    assert engine.hypotheses[0]["streak"] == 2
-    
-    # Epoch 3: Met -> VERIFIED (persistence window is 3)
-    engine.update({"acc": 0.9}, 3)
+    # Distance +1.0: Met -> VERIFIED (total 2.0 > 1.5)
+    engine.update({"acc": 0.9}, 1.0)
+    assert engine.hypotheses[0]["path_traveled"] == 2.0
     assert engine.hypotheses[0]["status"] == "VERIFIED"
     
-    # Epoch 4: Not met -> FALSIFIED
-    engine.update({"acc": 0.5}, 4)
+    # Not met -> FALSIFIED & path reset
+    engine.update({"acc": 0.5}, 0.5)
     assert engine.hypotheses[0]["status"] == "FALSIFIED"
+    assert engine.hypotheses[0]["path_traveled"] == 0.0

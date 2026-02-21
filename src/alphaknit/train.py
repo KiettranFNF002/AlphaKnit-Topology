@@ -165,6 +165,7 @@ def train_epoch(
     null_suite: NullEmergenceSuite = None, # v6.6-F: Scientific Control
     probe_pool: HiddenProbePool = None, # v6.6-F: Observer Decoupling
     measurement_dropout: float = 0.3, # v6.6-F: Prevent observer resonance
+    anchor_batch: dict = None, # v6.6-F Level 2: For invariant curvature
 ) -> dict:
     """Run one training epoch. Returns dict of average losses."""
     model.train()
@@ -189,6 +190,7 @@ def train_epoch(
     total_l_dist = 0.0
     total_pib = 0.0
     total_sharpness = 0.0
+    total_delta_dist = 0.0 # v6.6-F Level 2
     
     n_batches = 0
 
@@ -227,6 +229,10 @@ def train_epoch(
 
         pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)
         optimizer.zero_grad()
+
+        # v6.6-F Level 2: Stochastic Interrogation (Poisson-like)
+        # Prevents model from syncing to deterministic observer schedule
+        should_measure = np.random.random() > measurement_dropout
 
         # Forward
         logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
@@ -351,14 +357,30 @@ def train_epoch(
         loss_val = (1.0 * loss_type) + (0.3 * edge_weight * loss_parent) + (0.2 * loss_deg) + (0.01 * loss_dist)
         loss_val = loss_val + (tension_weight * loss_tension) + (lambda_ttf * ttf_loss_val)
         
-        # v6.0/6.1: Latent Capture with detachment
-        if portrait is not None and hasattr(model, 'last_hidden_state'):
+        # v6.1/6.6-F: Latent Capture with detachment
+        if portrait is not None and hasattr(model, 'last_hidden_state') and should_measure:
             portrait.capture(model.last_hidden_state.detach(), structural_mask)
+
+        # v6.6-F Level 2: Anchor Capture for Curvature
+        if portrait is not None and anchor_batch is not None and should_measure:
+            model.eval()
+            with torch.no_grad():
+                a_pc = anchor_batch['point_cloud'].to(device)
+                a_src = anchor_batch['src_tokens'].to(device)
+                a_mask = (a_src[:, :, 0] == config.PAD_ID)
+                _ = model(a_pc, a_src, tgt_key_padding_mask=a_mask)
+                if hasattr(model, 'last_hidden_state'):
+                    a_tgt = anchor_batch['tgt_tokens'].to(device)
+                    # Simple structural mask for anchor
+                    a_struct_mask = torch.zeros((a_pc.size(0), a_src.size(1)), dtype=torch.bool, device=device)
+                    for sid in [4, 5, 6, 7]:
+                        a_struct_mask |= (a_tgt[:, :, 0] == sid)
+                    portrait.capture(model.last_hidden_state.detach(), a_struct_mask, is_anchor=True)
+            model.train()
 
         # v6.6-F: Measurement Dropout & PIB
         pib_val = 0.0
-        mi_leak = 0.0
-        if probe_pool and np.random.random() > measurement_dropout:
+        if probe_pool and should_measure:
             # Identify last layer dynamically
             last_layer_prefix = None
             for name, _ in model.named_parameters():
@@ -374,18 +396,20 @@ def train_epoch(
                     train_grads[name] = p.grad.detach().clone()
             
             pib_val = probe_pool.compute_pib(model, train_grads, criterion, device)
-            
-            # Simplified MI Leak (if labels available in batch)
-            if hasattr(model, 'last_hidden_state') and 'type_labels' in point_cloud: # point_cloud here is the sample
-                # This needs more care, but for now we log PIB
-                pass
 
         # Optimization Step
         loss = loss_val / grad_accum_steps
         loss.backward()
         if (n_batches + 1) % grad_accum_steps == 0:
             nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            
+            # v6.6-F Level 2: Track Optimizer Path Length (||delta theta||)
+            params_before = torch.cat([p.detach().flatten() for p in model.parameters()]).clone()
             optimizer.step()
+            params_after = torch.cat([p.detach().flatten() for p in model.parameters()])
+            delta_dist = torch.norm(params_after - params_before).item()
+            total_delta_dist += delta_dist
+            
             optimizer.zero_grad()
 
         total_loss += loss_val.item()
@@ -435,6 +459,7 @@ def train_epoch(
         "struct_entropy": struct_metrics.get("struct_entropy", 0.0),
         "pib": total_pib / max(n_batches, 1),
         "sharpness": total_sharpness / max(n_batches, 1),
+        "delta_dist": total_delta_dist, # Cumulative for this epoch
     }
     
     # Reset tracking variables for next epoch
@@ -805,19 +830,30 @@ def train(
         edge_weight = 1.0 
         parent_noise_prob = 0.0
 
+        # v6.6-F Level 2: Anchor Batch Initialization
+        anchor_batch = None
+        if val_loader:
+             anchor_batch = next(iter(val_loader))
+        elif train_loader:
+             anchor_batch = next(iter(train_loader))
+
         train_metrics = train_epoch(
             model, train_loader, optimizer, criterion, criterion_p, device, 
             edge_weight=edge_weight, parent_noise_prob=parent_noise_prob, 
             grad_accum_steps=grad_accum_steps, prev_epoch_probs=prev_epoch_probs, 
             epoch=epoch, tension_weight=tension_weight, portrait=portrait,
             intervention_engine=intervention_engine, null_suite=null_suite,
-            probe_pool=probe_pool, measurement_dropout=0.3
+            probe_pool=probe_pool, measurement_dropout=0.3, anchor_batch=anchor_batch
         )
 
-        # Update Anchors (v6.6-F)
+        # Update Anchors (v6.6-F Level 2)
+        # Use Fixed Anchor Curvature instead of batch-based noise
+        fixed_curvature = portrait.get_curvature()
+        anchors.history["curvature"].append(fixed_curvature)
         anchors.update(model, portrait.history[-1] if portrait.history else None)
+        
         if hasattr(model, 'last_hidden_state'):
-            # Sample rank from a batch of latents
+            # Normalized Spectral Rank
             train_metrics["rank"] = anchors.compute_rank(model.last_hidden_state.detach().mean(dim=1))
         
         # v6.1/6.6-F: Compute Phase Lag and Update Discovery Engine
@@ -825,8 +861,10 @@ def train(
         train_metrics["phase_lag"] = phase_lag
         train_metrics["update_energy"] = update_energy
 
-        # Hypothesis Falsification Check
-        hypo_reports = hypotheses.update(train_metrics, epoch)
+        # Hypothesis Falsification Check (Grounded in Optimizer Distance)
+        delta_dist = train_metrics.get("delta_dist", 0.0)
+        hypo_reports = hypotheses.update(train_metrics, delta_dist)
+        
         
         # v6.6-F: Failure Monitor (Automated Rejection by Scientific Control)
         # If we are in 'real' mode, we compare against a virtual or previous null baseline

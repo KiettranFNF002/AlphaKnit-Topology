@@ -150,14 +150,15 @@ class LatentPhasePortrait:
     """
     VRAM-safe telemetry. Stores exactly ONE pooled structural embedding per epoch.
     Allows visualization of the learning trajectory (Phase Portrait).
-    Basis Freezing: Locks pooling basis after stabilization.
+    v6.6-F Level 2: Supports Fixed Anchor Curvature to eliminate data noise.
     """
     def __init__(self):
         self.history = []
-        self.locked_basis = None # TODO: Implement spectral locking in v6.6-F
+        self.anchor_history = [] # For fixed anchor curvature
+        self.locked_basis = None 
 
     @torch.no_grad()
-    def capture(self, hidden_states, structural_mask):
+    def capture(self, hidden_states, structural_mask, is_anchor=False):
         """
         hidden_states: [B, T, D] (last layer hidden states)
         structural_mask: [B, T] (bool mask of topology-defining tokens)
@@ -169,11 +170,22 @@ class LatentPhasePortrait:
         mask = structural_mask.unsqueeze(-1).float()
         
         # Grounding: Mean-of-means pooling to remove batch size bias
-        # 1. Mean over structural tokens per sample
         per_sample = (h * mask).sum(dim=1) / (mask.sum(dim=1) + 1e-6) # [B, D]
-        # 2. Mean over batch
         pooled = per_sample.mean(dim=0) # [D]
-        self.history.append(pooled.cpu().float().numpy())
+        
+        vector = pooled.cpu().float().numpy()
+        if is_anchor:
+            self.anchor_history.append(vector)
+        else:
+            self.history.append(vector)
+
+    def get_curvature(self):
+        """Calculates curvature ONLY on fixed anchors to isolate model behavior."""
+        if len(self.anchor_history) < 2:
+            return 0.0
+        v1 = self.anchor_history[-2]
+        v2 = self.anchor_history[-1]
+        return np.linalg.norm(v2 - v1) / (np.linalg.norm(v1) + 1e-8)
 
     def get_history(self):
         if not self.history:
@@ -227,10 +239,18 @@ class ModelRealityAnchors:
         
         self.prev_latents = current_latents
 
-        # Spectral Rank: exp(Entropy(SingularValues))
+    @torch.no_grad()
+    def compute_rank(self, latents_batch):
+        """
+        Spectral Rank: exp(Entropy(SingularValues))
+        v6.6-F Level 2: Normalized by sqrt(N) to remove sample size bias.
+        """
         if latents_batch.size(0) < 2: return 0.0
         
         centered = latents_batch - latents_batch.mean(dim=0)
+        # Normalize by sqrt of samples to stabilize scale
+        centered = centered / (np.sqrt(latents_batch.size(0)) + 1e-8)
+        
         # v6.6-F Grounding: Use fast and stable linalg.svdvals
         S = torch.linalg.svdvals(centered)
         
