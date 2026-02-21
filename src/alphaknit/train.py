@@ -459,7 +459,10 @@ def train(
                                     edge_weight=edge_weight, sector_weight=sector_weight, parent_noise_prob=parent_noise_prob)
         
         if val_loader is not None:
-            val_metrics = evaluate(model, val_loader, criterion, criterion_p, device, edge_weight=edge_weight)
+            # We must evaluate with edge_weight=1.0 so that the validation loss is a STATIC, absolute metric.
+            # If we evaluate with the curriculum edge_weight, the total val_loss will artificially INCREASE 
+            # as the curriculum ramps up, which triggers Early Stopping incorrectly because it looks like degradation!
+            val_metrics = evaluate(model, val_loader, criterion, criterion_p, device, edge_weight=1.0)
             val_loss = val_metrics["loss"]
         else:
             # If skipping validation (e.g. tar shards without explicit val split)
