@@ -95,8 +95,15 @@ def train_epoch(
         tgt_p1 = tgt_tokens[:, :, 1].reshape(B * T)
         tgt_p2 = tgt_tokens[:, :, 2].reshape(B * T)
 
-        # 1. Node Type Loss
+        # 1. Node Type Loss & Entropy
         loss_type = criterion(logits_type.reshape(B * T, V), tgt_type)
+        
+        # Calculate Node Entropy to monitor "intelligence jump" / phase transition
+        probs_type = torch.softmax(logits_type.reshape(B * T, V), dim=-1)
+        # Add epsilon to prevent log(0)
+        entropy = -(probs_type * torch.log(probs_type + 1e-9)).sum(-1)
+        valid_type_mask = (tgt_type != config.PAD_ID)
+        entropy_val = entropy[valid_type_mask].mean() if valid_type_mask.any() else torch.tensor(0.0, device=device)
 
         # 2. Parent Loss (only active if edge_weight > 0)
         loss_parent = 0.0
@@ -155,15 +162,24 @@ def train_epoch(
         total_l_deg += loss_deg.item() if isinstance(loss_deg, torch.Tensor) else loss_deg
         total_l_dist += loss_dist.item() if isinstance(loss_dist, torch.Tensor) else loss_dist
         
+        # Initialize total_entropy if not exists, since it's a new metric
+        if not hasattr(train_epoch, "total_entropy"):
+            train_epoch.total_entropy = 0.0
+        train_epoch.total_entropy += entropy_val.item()
+        
         n_batches += 1
 
-    return {
+    ret = {
         "loss": total_loss / max(n_batches, 1),
         "l_type": total_l_type / max(n_batches, 1),
         "l_edge": total_l_parent / max(n_batches, 1),
         "l_deg": total_l_deg / max(n_batches, 1),
         "l_dist": total_l_dist / max(n_batches, 1),
+        "entropy": train_epoch.total_entropy / max(n_batches, 1),
     }
+    # Reset tracking variable
+    train_epoch.total_entropy = 0.0
+    return ret
 
 
 # ------------------------------------------------------------------ #
@@ -469,10 +485,13 @@ def train(
             val_metrics = train_metrics
             val_loss = train_metrics["loss"]
 
+        # Phase 10: Delay scheduler steps during curriculum representation rewrite
         if scheduler_type == "cosine":
-            scheduler.step()
+            if epoch >= 18:
+                scheduler.step()
         else:
-            scheduler.step(val_loss)
+            if epoch >= 18:
+                scheduler.step(val_loss)
 
         # Phase 8: compile success rate (every N epochs or last epoch)
         compile_rate = None
@@ -501,6 +520,7 @@ def train(
             "train_l_type": round(train_metrics["l_type"], 4),
             "train_l_edge": round(train_metrics["l_edge"], 4),
             "train_l_deg": round(train_metrics["l_deg"], 4),
+            "train_entropy": round(train_metrics.get("entropy", 0.0), 3),
             "val_loss": round(val_metrics["loss"], 4),
             "edge_weight": round(edge_weight, 3),
         }
@@ -513,7 +533,8 @@ def train(
 
         # Console log
         cr_str = f" | compile={compile_rate*100:.1f}%" if compile_rate is not None else ""
-        print(f"Epoch {epoch:3d}/{epochs} | train={train_metrics['loss']:.4f} (ty={train_metrics['l_type']:.2f}, ed={train_metrics['l_edge']:.2f}) | val={val_loss:.4f}{cr_str}")
+        entropy_str = f", ent={train_metrics.get('entropy', 0.0):.2f}"
+        print(f"Epoch {epoch:3d}/{epochs} | train={train_metrics['loss']:.4f} (ty={train_metrics['l_type']:.2f}, ed={train_metrics['l_edge']:.2f}{entropy_str}) | val={val_loss:.4f}{cr_str}")
 
         # Save best checkpoint
         if val_loss < best_val_loss:
@@ -532,7 +553,8 @@ def train(
             }, ckpt_path)
         else:
             no_improve += 1
-            if no_improve >= early_stop_patience:
+            # Phase 10: Early stopping ONLY triggers after Epoch 25 to allow emergence
+            if no_improve >= early_stop_patience and epoch >= 25:
                 print(f"\nEarly stopping at epoch {epoch} (no improvement for {early_stop_patience} epochs)")
                 break
 
