@@ -123,21 +123,15 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
     # Check if dataset_dir is a WebDataset tar pattern
     if ".tar" in dataset_dir or "{" in dataset_dir:
         import webdataset as wds
-        
-        # 1. Parse number of shards and split 90/10 Train/Val
         import glob
         import re
         
         # If dataset_dir is something like "data/processed/shards_phase9b_full/shard-{0000..0049}.tar"
         base_dir = dataset_dir.split("{")[0]
-        # Allow expanding the curly brace string to get all shard files
-        import subprocess
-        # Fallback to simple logic: we know it's 50 shards from user context, but let's parse safely.
         shard_files = glob.glob(base_dir + "*.tar")
         shard_files.sort()
         
         if len(shard_files) == 0:
-            # Fallback if we can't parse glob
             train_pattern = dataset_dir
             val_pattern = None
             print(f"Warning: Could not parse 90/10 split for {dataset_dir}. Using all for training.")
@@ -145,9 +139,6 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
             val_size = max(1, int(len(shard_files) * 0.1)) # 10% for val
             train_files = shard_files[:-val_size]
             val_files = shard_files[-val_size:]
-            
-            # Format back to WebDataset brace pattern or just pass list of urls
-        # Format back to WebDataset brace pattern or just pass list of urls
             train_pattern = train_files
             val_pattern = val_files
 

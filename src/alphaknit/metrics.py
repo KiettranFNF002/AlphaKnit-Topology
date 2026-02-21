@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-def topology_tension_field(node_degrees, edge_count, num_nodes, lambda_density=0.1):
+def topology_tension_field(node_degrees, edge_count, num_nodes, lambda_density=0.1, report_only=False):
     """
     Structural Regularization Loss.
     Penalizes high degree variance and rewards minimum edge density to avoid "Lazy Collapse".
@@ -20,6 +20,10 @@ def topology_tension_field(node_degrees, edge_count, num_nodes, lambda_density=0
         "degree_var": degree_var.detach().item(),
         "edge_density": edge_density.detach().item()
     }
+    
+    if report_only:
+        return torch.tensor(0.0, device=ttf_loss.device, requires_grad=True), stats
+        
     return ttf_loss, stats
 
 

@@ -8,13 +8,21 @@ def compute_phase_lag(model, optimizer):
     """
     Cosine similarity between gradient direction and Adam momentum (exp_avg).
     Only measures FINAL transformer + output head to focus on topological orientation.
+    Includes Adam bias correction for early-epoch accuracy.
     """
     cosines = []
     
     # Target only late layers where orientation and topology are finalized
-    # We use common keywords found in model architectures
     target_keywords = ["transformer.layers.-1", "lm_head", "output_proj", "final_norm"]
     
+    # Adam bias correction terms
+    t = 0
+    beta1 = 0.9
+    for group in optimizer.param_groups:
+        # We assume standard Adam defaults here for simplicity in telemetry
+        beta1 = group.get('betas', (0.9, 0.999))[0]
+        break
+
     for name, p in model.named_parameters():
         if not any(k in name for k in target_keywords):
             continue
@@ -26,15 +34,24 @@ def compute_phase_lag(model, optimizer):
         if not state or "exp_avg" not in state:
             continue
             
-        # Memory safety: detach momentum
+        # Get step count for bias correction
+        step = state.get('step', 0)
+        if isinstance(step, torch.Tensor):
+            step = step.item()
+            
+        # Memory safety: detach momentum and grad
         grad = p.grad.detach().flatten()
         momentum = state["exp_avg"].detach().flatten()
+        
+        # Apply Bias Correction: m_hat = m / (1 - beta1^t)
+        if step > 0:
+            bias_correction = 1 - (beta1 ** step)
+            momentum = momentum / bias_correction
         
         if grad.numel() == 0:
             continue
             
-        # Cosine similarity between gradient direction and momentum direction
-        # Note: Adam update is roughly -exp_avg, we look at the alignment
+        # Cosine similarity between gradient direction and bias-corrected momentum
         cos = F.cosine_similarity(
             grad.unsqueeze(0),
             momentum.unsqueeze(0),
@@ -62,15 +79,21 @@ class LatentPhasePortrait:
         hidden_states: [B, T, D] (last layer hidden states)
         structural_mask: [B, T] (bool mask of topology-defining tokens)
         """
-        # Ensure mask is broadcastable [B, T, 1]
+        if hidden_states is None:
+            return
+
+        # Ensure hidden_states corresponds to the last layer/output
+        # Enforce detachment and CPU move immediately
+        h = hidden_states.detach()
         mask = structural_mask.unsqueeze(-1).float()
         
         # Mean pooling only over structural tokens across entire batch
-        sum_hidden = (hidden_states * mask).sum(dim=(0, 1))
+        sum_hidden = (h * mask).sum(dim=(0, 1))
         denom = mask.sum() + 1e-6
         
         pooled = sum_hidden / denom # [D]
-        self.history.append(pooled.cpu().numpy())
+        # Store as numpy to break all torch graph references
+        self.history.append(pooled.cpu().float().numpy())
 
     def get_history(self):
         if not self.history:
