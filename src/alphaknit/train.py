@@ -419,8 +419,22 @@ def train(
             optimizer, patience=3, factor=0.5
         )
 
+    # Phase 10: Anti-Collapse Class Weights for Node Type Prediction
+    # Weights for pad/cls/sep are 0 (ignored), others are balanced to prevent 'dec' (7) dominance
+    # config.VOCAB = {'pad': 0, 'cls': 1, 'sep': 2, 'sc': 3, 'inc': 4, 'mr_l': 5, 'mr_r': 6, 'dec': 7}
+    class_weights = torch.ones(len(config.VOCAB), device=device)
+    class_weights[0] = 0.0 # pad ignore
+    class_weights[1] = 0.1 # cls low impact
+    class_weights[2] = 0.1 # sep low impact
+    class_weights[7] = 0.5 # dec is very common, reduce priority
+    class_weights[3] = 2.0 # sc
+    class_weights[4] = 3.0 # inc
+    class_weights[5] = 4.0 # mr_l
+    class_weights[6] = 4.0 # mr_r
+    
     # Phase 8: label smoothing — prevents overconfidence on sc
     criterion = nn.CrossEntropyLoss(
+        weight=class_weights,
         ignore_index=config.PAD_ID,
         label_smoothing=label_smoothing,
     )
@@ -433,13 +447,13 @@ def train(
     no_improve = 0  # early stopping counter
 
     for epoch in range(start_epoch, epochs + 1):
-        # Phase 9B Training Curriculum
-        # Sigmoid transition for edge weight centered at epoch 5
-        edge_weight = 1.0 / (1.0 + math.exp(-(epoch - 6) / 1.5))
-        # Sector loss activates late (epoch 12)
-        sector_weight = 1.0 / (1.0 + math.exp(-(epoch - 14) / 2.0))
-        # 5% parent noise during Stage 1 (Epoch 0-5)
-        parent_noise_prob = 0.05 if epoch <= 5 else 0.0
+        # Phase 10 Training Curriculum
+        # Slowed down Sigmoid transition for edge weight (Centered at Epoch 10, width 4)
+        edge_weight = 1.0 / (1.0 + math.exp(-(epoch - 10) / 4.0))
+        # Sector loss activates late (epoch 20)
+        sector_weight = 1.0 / (1.0 + math.exp(-(epoch - 20) / 2.0))
+        # 5% parent noise during Stage 1 (Epoch 0-10)
+        parent_noise_prob = 0.05 if epoch <= 10 else 0.0
 
         train_metrics = train_epoch(model, train_loader, optimizer, criterion, criterion_p, device, 
                                     edge_weight=edge_weight, sector_weight=sector_weight, parent_noise_prob=parent_noise_prob)

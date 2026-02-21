@@ -115,13 +115,32 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
     if ".tar" in dataset_dir or "{" in dataset_dir:
         import webdataset as wds
         
-        import io
+        # 1. Parse number of shards and split 90/10 Train/Val
+        import glob
+        import re
         
-        # We assume the user creates validation shards or we don't do formal validation splits here.
-        # For AlphaKnit Colab Scale-Up, training is the priority. 
-        # Here we just wrap the WebDataset into a train loader.
-        # Format: {"pc": tensor, "src": tensor, "tgt": tensor} inside the .pt
+        # If dataset_dir is something like "data/processed/shards_phase9b_full/shard-{0000..0049}.tar"
+        base_dir = dataset_dir.split("{")[0]
+        # Allow expanding the curly brace string to get all shard files
+        import subprocess
+        # Fallback to simple logic: we know it's 50 shards from user context, but let's parse safely.
+        shard_files = glob.glob(base_dir + "*.tar")
+        shard_files.sort()
         
+        if len(shard_files) == 0:
+            # Fallback if we can't parse glob
+            train_pattern = dataset_dir
+            val_pattern = None
+            print(f"Warning: Could not parse 90/10 split for {dataset_dir}. Using all for training.")
+        else:
+            val_size = max(1, int(len(shard_files) * 0.1)) # 10% for val
+            train_files = shard_files[:-val_size]
+            val_files = shard_files[-val_size:]
+            
+            # Format back to WebDataset brace pattern or just pass list of urls
+            train_pattern = train_files
+            val_pattern = val_files
+
         def decode_and_extract(sample):
             # sample['pt'] is raw bytes from the tar archive
             pt_bytes = sample["pt"]
@@ -130,19 +149,24 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
             return pt_dict["pc"], pt_dict["src"], pt_dict["tgt"]
 
         train_ds = (
-            wds.WebDataset(dataset_dir, resampled=False, shardshuffle=100)
+            wds.WebDataset(train_pattern, resampled=False, shardshuffle=100)
             .shuffle(1000)
             .map(decode_and_extract)
             .batched(batch_size)
         )
-        
-        # WebLoader handles the batched iterable
         train_loader = wds.WebLoader(train_ds, batch_size=None, num_workers=num_workers)
         
-        # For validation, we return None or a minimal dummy loader when using WebDataset 
-        # (user should specify validation explicitly if needed in Tar mode).
-        print(f"Loaded WebDataset shards from {dataset_dir} (Validation skipped for now)")
-        return train_loader, None
+        if val_pattern is not None:
+            val_ds = (
+                wds.WebDataset(val_pattern, resampled=False, shardshuffle=False)
+                .map(decode_and_extract)
+                .batched(batch_size)
+            )
+            val_loader = wds.WebLoader(val_ds, batch_size=None, num_workers=num_workers)
+            print(f"Loaded WebDataset shards: {len(train_files)} Train | {len(val_files)} Val")
+            return train_loader, val_loader
+        else:
+            return train_loader, None
 
     # Fallback to standard Map-Style dataset
     dataset = KnittingDataset(dataset_dir)
