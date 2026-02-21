@@ -428,7 +428,37 @@ def compute_compile_success_rate(
     confusion_counts: dict mapping (pred_token, true_token) → count
     for non-PAD positions. Useful to detect sc↔inc confusion.
     """
+    import os
     from .compiler import KnittingCompiler, CompileError
+
+    def _save_emergence_graph(stitch_graph, filepath):
+        try:
+            import networkx as nx
+            import matplotlib.pyplot as plt
+            
+            G = nx.DiGraph()
+            for nid, node in stitch_graph.nodes.items():
+                G.add_node(nid, type=node.stitch_type)
+                for pid in node.parents:
+                    G.add_edge(pid, nid)
+                    
+            plt.figure(figsize=(8, 8))
+            pos = nx.spring_layout(G, seed=42)
+            
+            colors = []
+            for n in G.nodes():
+                t = G.nodes[n]['type']
+                if 'mr' in t: colors.append('red')
+                elif t == 'inc': colors.append('green')
+                elif t == 'dec': colors.append('orange')
+                else: colors.append('lightblue')
+                
+            nx.draw(G, pos, node_color=colors, with_labels=False, node_size=30, edge_color='gray', arrows=True, arrowsize=8, alpha=0.8)
+            plt.title(f"Emergence Watch - Size: {len(G.nodes)}")
+            plt.savefig(filepath, dpi=120, bbox_inches='tight')
+            plt.close()
+        except Exception as e:
+            pass # Silently fail if plotting is unavailable
 
     model.eval()
     compiler = KnittingCompiler()
@@ -436,6 +466,7 @@ def compute_compile_success_rate(
     compile_ok = 0
     compile_total = 0
     confusion = {}   # (pred_id, true_id) → count
+    graphs_saved = 0
 
     for i, (point_cloud, src_tokens, tgt_tokens) in enumerate(loader):
         if i >= n_batches_max:
@@ -449,12 +480,31 @@ def compute_compile_success_rate(
         pred_ids_list = model.greedy_decode(point_cloud, max_len=config.MAX_SEQ_LEN)
 
         for b, pred_ids in enumerate(pred_ids_list):
-            # For compiler, just extract the node types to do a rough sequence validation
-            types_only = [tpl[0] if isinstance(tpl, tuple) else tpl for tpl in pred_ids]
-            tokens = [config.ID_TO_TOKEN.get(t, "<UNK>") for t in types_only]
+            # Format tuples (type, p1, p2) to full syntax for compiler
+            tokens = []
+            for tpl in pred_ids:
+                if isinstance(tpl, tuple) and len(tpl) == 3:
+                    t, p1, p2 = tpl
+                    t_str = config.ID_TO_TOKEN.get(t, "<UNK>")
+                    tokens.append(f"{t_str}({p1},{p2})")
+                else:
+                    t_str = config.ID_TO_TOKEN.get(tpl, "<UNK>")
+                    tokens.append(f"{t_str}(0,0)") # Fallback
+
             try:
-                compiler.compile(tokens)
+                graph = compiler.compile(tokens)
                 compile_ok += 1
+                
+                # Visual Emergence Watcher
+                if getattr(compute_compile_success_rate, "checkpoint_dir", None) is not None:
+                    epoch = getattr(compute_compile_success_rate, "current_epoch", 0)
+                    if epoch > 0 and epoch % 2 == 0 and graphs_saved < 3:
+                        watch_dir = os.path.join(compute_compile_success_rate.checkpoint_dir, "emergence_watch")
+                        os.makedirs(watch_dir, exist_ok=True)
+                        filepath = os.path.join(watch_dir, f"epoch_{epoch:03d}_sample_{graphs_saved}.png")
+                        _save_emergence_graph(graph, filepath)
+                        graphs_saved += 1
+                        
             except (CompileError, Exception):
                 pass
             compile_total += 1
@@ -667,6 +717,10 @@ def train(
         compile_rate = None
         top_confusions = []
         if epoch % log_compile_every == 0 or epoch == epochs:
+            # Inject context for Emergence Watcher
+            compute_compile_success_rate.checkpoint_dir = checkpoint_dir
+            compute_compile_success_rate.current_epoch = epoch
+            
             compile_rate, confusion = compute_compile_success_rate(
                 model, val_loader or train_loader, device, n_batches_max=8
             )
