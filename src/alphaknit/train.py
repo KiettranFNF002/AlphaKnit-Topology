@@ -143,6 +143,80 @@ def train_epoch(
         loss_dist = 0.0
         if valid_mask.any():
             loss_dist = (exp_p1[valid_mask] + exp_p2[valid_mask]).mean()
+            
+        # 5. Topology Tension Signal (Phase 10.5)
+        loss_tension = torch.tensor(0.0, device=device)
+        loss_div = torch.tensor(0.0, device=device)
+        loss_entropy = torch.tensor(0.0, device=device)
+        
+        if epoch >= 12:
+            if epoch < 18:
+                tau = 0.5
+                frac = 0.2
+            elif epoch < 30:
+                tau = 0.4
+                frac = 0.5
+            else:
+                tau = 0.3
+                frac = 1.0
+                
+            # Compute probabilities with temperature
+            probs_p1_t = torch.softmax(logits_p1.reshape(B, T, P_MAX) / tau, dim=-1)
+            probs_p2_t = torch.softmax(logits_p2.reshape(B, T, P_MAX) / tau, dim=-1)
+            
+            # Entropy barrier
+            ent_p1 = -(probs_p1_t * torch.log(probs_p1_t + 1e-9)).sum(-1)
+            ent_p2 = -(probs_p2_t * torch.log(probs_p2_t + 1e-9)).sum(-1)
+            loss_entropy = (ent_p1 + ent_p2).mean() * 0.5
+            
+            # Parent Diversity Bias
+            loss_div = (probs_p1_t * probs_p2_t).sum(-1).mean()
+            
+            # Continuous Adjacency Matrix A: (B, T, T)
+            A = torch.zeros(B, T, T, device=device)
+            for offset in range(1, P_MAX): # 0 is PAD/no parent
+                if T - offset <= 0: continue
+                prob = 0.5 * (probs_p1_t[:, offset:, offset] + probs_p2_t[:, offset:, offset])
+                A.diagonal(dim1=1, dim2=2, offset=-offset).copy_(prob)
+                
+            # Degree Normalization
+            deg = A.sum(dim=-1, keepdim=True) + 1e-9
+            A_tilde = A / deg
+            
+            # Initialization
+            X = torch.randn(B, T, 3, device=device)
+            T_active = max(1, int(T * frac))
+            T_start = T - T_active
+            
+            # Residual Laplacian Relaxation
+            alpha = 0.2
+            for _ in range(3):
+                X_next = X + alpha * (torch.bmm(A_tilde, X) - X)
+                if T_start > 0:
+                    X_early = X_next[:, :T_start, :].detach()
+                    X_next = torch.cat([X_early, X_next[:, T_start:, :]], dim=1)
+                X = X_next
+                
+            # Scale-Invariant Tension Energy
+            X_expand_i = X.unsqueeze(2) # (B, T, 1, 3)
+            X_expand_j = X.unsqueeze(1)    # (B, 1, T, 3)
+            dist = torch.sqrt(((X_expand_i - X_expand_j)**2).sum(-1) + 1e-9) # (B, T, T)
+            
+            mean_dist = dist.mean(dim=(1, 2), keepdim=True) + 1e-9
+            d_hat = dist / mean_dist
+            
+            E = A * (d_hat - 1.0)**2 # (B, T, T)
+            
+            # Mask inactive nodes and padding
+            valid_mask_2d = (tgt_tokens[:, :, 0] != config.PAD_ID) # (B, T)
+            valid_mask_E = valid_mask_2d.unsqueeze(2).expand(B, T, T) # (B, T, T)
+            
+            if T_start > 0:
+                E = E[:, T_start:, :]
+                valid_mask_E = valid_mask_E[:, T_start:, :]
+                
+            if valid_mask_E.any():
+                loss_tension = E[valid_mask_E].mean()
 
         # Phase 9B Total Loss Combination
         # Weights: Type: 1.0, Edge: 0.3, Deg: 0.2, Dist: 0.01 (Chamfer will be added separately if integrated)
@@ -151,7 +225,12 @@ def train_epoch(
         W_DEG = 0.2
         W_DIST = 0.01
         
+        W_TENSION = 0.02
+        W_ENTROPY = 0.005
+        W_DIV = 0.002
+        
         loss_val = (W_TYPE * loss_type) + (W_PARENT * loss_parent) + (W_DEG * loss_deg) + (W_DIST * loss_dist)
+        loss_val = loss_val + (W_TENSION * loss_tension) + (W_ENTROPY * loss_entropy) + (W_DIV * loss_div)
         
         # Scale loss before backward for gradient accumulation
         loss = loss_val / grad_accum_steps
@@ -173,6 +252,13 @@ def train_epoch(
             train_epoch.total_entropy = 0.0
         train_epoch.total_entropy += entropy_val.item()
         
+        if not hasattr(train_epoch, "total_tension"):
+            train_epoch.total_tension = 0.0
+        if isinstance(loss_tension, torch.Tensor):
+            train_epoch.total_tension += loss_tension.item()
+        else:
+            train_epoch.total_tension += loss_tension
+        
         n_batches += 1
 
     ret = {
@@ -182,9 +268,11 @@ def train_epoch(
         "l_deg": total_l_deg / max(n_batches, 1),
         "l_dist": total_l_dist / max(n_batches, 1),
         "entropy": train_epoch.total_entropy / max(n_batches, 1),
+        "tension": train_epoch.total_tension / max(n_batches, 1),
     }
     # Reset tracking variable
     train_epoch.total_entropy = 0.0
+    train_epoch.total_tension = 0.0
     return ret
 
 
@@ -530,6 +618,7 @@ def train(
             "train_l_edge": round(train_metrics["l_edge"], 4),
             "train_l_deg": round(train_metrics["l_deg"], 4),
             "train_entropy": round(train_metrics.get("entropy", 0.0), 3),
+            "train_tension": round(train_metrics.get("tension", 0.0), 4),
             "val_loss": round(val_metrics["loss"], 4),
             "edge_weight": round(edge_weight, 3),
         }
@@ -542,8 +631,8 @@ def train(
 
         # Console log
         cr_str = f" | compile={compile_rate*100:.1f}%" if compile_rate is not None else ""
-        entropy_str = f", ent={train_metrics.get('entropy', 0.0):.2f}"
-        print(f"Epoch {epoch:3d}/{epochs} | train={train_metrics['loss']:.4f} (ty={train_metrics['l_type']:.2f}, ed={train_metrics['l_edge']:.2f}{entropy_str}) | val={val_loss:.4f}{cr_str}")
+        ent_tension_str = f", ent={train_metrics.get('entropy', 0.0):.2f}, ts={train_metrics.get('tension', 0.0):.3f}"
+        print(f"Epoch {epoch:3d}/{epochs} | train={train_metrics['loss']:.4f} (ty={train_metrics['l_type']:.2f}, ed={train_metrics['l_edge']:.2f}{ent_tension_str}) | val={val_loss:.4f}{cr_str}")
 
         # Save best checkpoint
         if val_loss < best_val_loss:
