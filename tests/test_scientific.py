@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import pytest
 from alphaknit.scientific import InterventionEngine, HypothesisEngine, NullEmergenceSuite
+from alphaknit.research import FeatureFingerprint
 from alphaknit.model import KnittingTransformer
 
 class SimpleModel(nn.Module):
@@ -78,3 +79,32 @@ def test_hypothesis_engine_persistence():
     engine.update({"acc": 0.5}, 0.5)
     assert engine.hypotheses[0]["status"] == "FALSIFIED"
     assert engine.hypotheses[0]["path_traveled"] == 0.0
+
+def test_hypothesis_engine_shadow_rejection():
+    engine = HypothesisEngine(persistence_threshold=1.0)
+    engine.propose("Causal_Hypo", "Desc", lambda m: m["acc"] > 0.8)
+    engine.update({"acc": 0.9}, 2.0)
+    assert engine.hypotheses[0]["status"] == "VERIFIED"
+    
+    # Shadow Delta too small -> Rejection
+    engine.monitor_failure({"acc": 0.9}, {"struct_acc": 0.0}, shadow_delta=0.01)
+    assert engine.hypotheses[0]["status"] == "FALSIFIED_BY_SHADOW"
+
+def test_feature_fingerprint_stability():
+    fingerprint = FeatureFingerprint(top_k=2)
+    
+    # Hidden states: [B, T, D]
+    h1 = torch.ones(2, 4, 10)
+    h1[0, 0, 0] = 2.0 # Add some variance
+    
+    s1 = fingerprint.update(h1)
+    assert s1 == 1.0 # First check is baseline
+    
+    # Same state -> High stability
+    s2 = fingerprint.update(h1)
+    assert s2 > 0.99
+    
+    # Orthogonal shift -> Low stability
+    h2 = torch.randn(2, 4, 10)
+    s3 = fingerprint.update(h2)
+    assert s3 < 0.5 or s3 < s2

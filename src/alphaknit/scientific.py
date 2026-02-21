@@ -10,8 +10,9 @@ class InterventionEngine:
     """
     def __init__(self, model):
         self.model = model
-        self.active_interventions = {} # {layer_name: {"type": str, "remaining": int, "handle": handle}}
+        self.active_interventions = {} 
         self.random_baseline_prob = 0.15
+        self.shadow_mode = False # v6.6-F Level 3: Dual-pass counterfactual mode
 
     def register_intervention(self, layer_name, type="noise", duration=5):
         # Clean up existing hook if present
@@ -73,8 +74,10 @@ class InterventionEngine:
 
     def hook_fn(self, module, input, output):
         """The actual perturbation logic."""
-        # We compute noise without grad, but the addition must happen in-graph
-        # to allow backprop to flow through the layer's inputs.
+        if self.shadow_mode:
+            # In shadow mode, we don't apply noise (Identity pass)
+            return output
+
         if isinstance(output, tuple):
             h = output[0]
             with torch.no_grad():
@@ -140,19 +143,28 @@ class HypothesisEngine:
         
         return report
 
-    def monitor_failure(self, real_metrics, null_metrics):
+    def monitor_failure(self, real_metrics, null_metrics, shadow_delta=None):
         """
-        Automated Hypothesis Rejection: If Null Mode (Placebo) shows stronger structural
-        emergence than the real run, then the current hypothesis is invalid.
+        v6.6-F Level 3: Adversarial Falsification.
+        1. Rejection by Placebo: If Null Suite shows similar emergence.
+        2. Rejection by Shadow: If intervention has no significant delta vs non-intervention.
         """
         for h in self.hypotheses:
             if h["status"] == "VERIFIED":
+                # 1. Placebo Check
                 if null_metrics.get("struct_acc", 0) > real_metrics.get("struct_acc", 0) * 1.5:
-                    print(f"⚠️ REJECTED: Discovery '{h['name']}' rejected by Null Control at epoch {real_metrics['epoch']}.")
+                    print(f"⚠️ REJECTED: Discovery '{h['name']}' rejected by Null Control at epoch {real_metrics.get('epoch', '?')}.")
                     h["status"] = "REJECTED_BY_CONTROL"
+                
+                # 2. Shadow Delta Check (Counterfactual)
+                if shadow_delta is not None:
+                     # If the delta (perturbation effect) is too small, it's not a causal link
+                     if shadow_delta < 0.05: # Threshold for causal relevance
+                         print(f"⚠️ REJECTED: Discovery '{h['name']}' rejected by Shadow Path (Delta={shadow_delta:.4f}).")
+                         h["status"] = "FALSIFIED_BY_SHADOW"
 
     def get_survival_map(self):
-        return {h["name"]: h["status"] for h in self.hypotheses}
+        return {h["name"]: h.get("status", "Unknown") for h in self.hypotheses}
 
 
 class NullEmergenceSuite:

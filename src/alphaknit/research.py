@@ -275,6 +275,49 @@ class ModelRealityAnchors:
         return corr
 
 
+class FeatureFingerprint:
+    """
+    v6.6-F Level 3: Mechanistic Identity.
+    Tracks the principal directions of hidden activations to identify "Structural Invariants".
+    If the top K directions (eigenvectors) stabilize, it confirms a "Representational Discovery".
+    """
+    def __init__(self, top_k=5):
+        self.top_k = top_k
+        self.history = [] # List of top_k eigenvectors [K, D]
+        self.persistence = [] # Cosine similarity of top_k directions over time
+
+    @torch.no_grad()
+    def update(self, hidden_states):
+        """
+        hidden_states: [B, T, D]
+        """
+        if hidden_states is None: return
+        
+        # 1. Flatten to [N, D] where N = B*T
+        B, T, D = hidden_states.shape
+        flat = hidden_states.reshape(-1, D)
+        centered = flat - flat.mean(dim=0)
+        
+        # 2. Compute SVD to get principal directions (V.T)
+        # Using linalg.svd for full V matrix
+        _, _, Vh = torch.linalg.svd(centered, full_matrices=False)
+        top_directions = Vh[:self.top_k].detach().cpu().numpy() # [K, D]
+        
+        # 3. Track Persistence (Cosine similarity with previous directions)
+        if self.history:
+            prev = self.history[-1]
+            # Average cosine similarity of the top direction
+            sim = np.abs(np.dot(top_directions[0], prev[0]))
+            self.persistence.append(sim)
+        
+        self.history.append(top_directions)
+        return self.persistence[-1] if self.persistence else 1.0
+
+    def get_stability(self):
+        if not self.persistence: return 0.0
+        return np.mean(self.persistence[-3:]) # Last 3 checks
+
+
 class EmergenceTracker:
     """
     Detects the "Crystallization Window" for post-peak checkpoint saving.

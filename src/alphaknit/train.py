@@ -166,6 +166,7 @@ def train_epoch(
     probe_pool: HiddenProbePool = None, # v6.6-F: Observer Decoupling
     measurement_dropout: float = 0.3, # v6.6-F: Prevent observer resonance
     anchor_batch: dict = None, # v6.6-F Level 2: For invariant curvature
+    fingerprint: FeatureFingerprint = None, # v6.6-F Level 3: Mechanistic Identity
 ) -> dict:
     """Run one training epoch. Returns dict of average losses."""
     model.train()
@@ -190,7 +191,9 @@ def train_epoch(
     total_l_dist = 0.0
     total_pib = 0.0
     total_sharpness = 0.0
-    total_delta_dist = 0.0 # v6.6-F Level 2
+    total_delta_dist = 0.0 
+    total_shadow_delta = 0.0 # v6.6-F Level 3
+    shadow_counts = 0
     
     n_batches = 0
 
@@ -236,6 +239,26 @@ def train_epoch(
 
         # Forward
         logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+        
+        # v6.6-F Level 3: Counterfactual Shadow Pass
+        # If interventions are active, we run a clean 'shadow' pass to measure causal delta
+        shadow_delta = 0.0
+        if intervention_engine and intervention_engine.active_interventions and should_measure:
+             intervention_engine.shadow_mode = True
+             with torch.no_grad():
+                  # Clean pass (No noise)
+                  s_logits_type, _, _ = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+                  # Calculate Norm of probability shift as Delta
+                  p_real = torch.softmax(logits_type, dim=-1).detach()
+                  p_shadow = torch.softmax(s_logits_type, dim=-1)
+                  shadow_delta = torch.norm(p_real - p_shadow).item()
+                  total_shadow_delta += shadow_delta
+                  shadow_counts += 1
+             intervention_engine.shadow_mode = False
+
+        # v6.6-F Level 3: Feature Fingerprinting (Representational Invariants)
+        if fingerprint is not None and hasattr(model, 'last_hidden_state') and should_measure:
+             _ = fingerprint.update(model.last_hidden_state.detach())
         
         B, T, _ = tgt_tokens.shape
         V = logits_type.shape[-1]
@@ -459,7 +482,8 @@ def train_epoch(
         "struct_entropy": struct_metrics.get("struct_entropy", 0.0),
         "pib": total_pib / max(n_batches, 1),
         "sharpness": total_sharpness / max(n_batches, 1),
-        "delta_dist": total_delta_dist, # Cumulative for this epoch
+        "delta_dist": total_delta_dist,
+        "shadow_delta": total_shadow_delta / max(shadow_counts, 1) if shadow_counts > 0 else 0.0,
     }
     
     # Reset tracking variables for next epoch
@@ -727,6 +751,7 @@ def train(
     hypotheses = HypothesisEngine()
     intervention_engine = InterventionEngine(model)
     null_suite = NullEmergenceSuite(mode=os.environ.get("AK_NULL_MODE", "real"))
+    fingerprint = FeatureFingerprint(top_k=5) # v6.6-F Level 3
     
     # Null Mode setup
     if null_suite.mode != "real":
@@ -843,7 +868,8 @@ def train(
             grad_accum_steps=grad_accum_steps, prev_epoch_probs=prev_epoch_probs, 
             epoch=epoch, tension_weight=tension_weight, portrait=portrait,
             intervention_engine=intervention_engine, null_suite=null_suite,
-            probe_pool=probe_pool, measurement_dropout=0.3, anchor_batch=anchor_batch
+            probe_pool=probe_pool, measurement_dropout=0.3, anchor_batch=anchor_batch,
+            fingerprint=fingerprint
         )
 
         # Update Anchors (v6.6-F Level 2)
@@ -863,8 +889,11 @@ def train(
 
         # Hypothesis Falsification Check (Grounded in Optimizer Distance)
         delta_dist = train_metrics.get("delta_dist", 0.0)
+        shadow_delta = train_metrics.get("shadow_delta", 0.0)
         hypo_reports = hypotheses.update(train_metrics, delta_dist)
-        
+
+        # v6.6-F Level 3: Feature Identity Stability
+        train_metrics["fingerprint_stability"] = fingerprint.get_stability()
         
         # v6.6-F: Failure Monitor (Automated Rejection by Scientific Control)
         # If we are in 'real' mode, we compare against a virtual or previous null baseline
@@ -876,7 +905,7 @@ def train(
                 with open(null_path) as f: null_metrics = json.load(f)
             except Exception: pass
             
-        hypotheses.monitor_failure(train_metrics, null_metrics)
+        hypotheses.monitor_failure(train_metrics, null_metrics, shadow_delta=shadow_delta)
 
         for rep in hypo_reports:
             if "VERIFIED" in rep: print(f"✅ DISCOVERY: {rep}")
