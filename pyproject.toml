@@ -2,7 +2,7 @@
 name = "alphaknit-arigurumi"
 version = "6.6.1+g"
 description = "Mechanistic Discovery Engine for Amigurumi Topology"
-authors = [{name = "Anh Kiet", email = "kiet@example.com"}]
+authors = [{name = "T.A. Kiet", email = "akietakatak2705@gmail.com"}]
 dependencies = [
     "torch>=2.0.0",
     "numpy>=1.24.0",
