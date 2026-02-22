@@ -1,6 +1,6 @@
 [project]
 name = "alphaknit-arigurumi"
-version = "6.6.1-G"
+version = "6.6.1+g"
 description = "Mechanistic Discovery Engine for Amigurumi Topology"
 authors = [{name = "Anh Kiet", email = "kiet@example.com"}]
 dependencies = [
@@ -24,3 +24,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -58,6 +58,15 @@ Track **Curvature Flux**, **Fingerprint Stability**, and **Structural Margin**:
 python scripts/plot_v6_telemetry.py --history checkpoints/training_history_v6.6F.json
 ```
 
+## 🧪 Quick Audit (2026-02-22)
+- **Bug fixed**: `pyproject.toml` used a non-PEP440 version (`6.6.1-G`) that broke `pip install -e .`.
+- **Version consistency fixed**: package metadata now uses valid PEP440 (`6.6.1+g`) while preserving the `v6.6-G` release label in docs.
+- **Naive test discovery fixed**: `pytest` now only discovers tests in `/tests` to avoid accidental collection of diagnostic scripts in `/scripts`.
+- **Recommended next optimizations**:
+  - Split heavyweight dependencies (`torch`, `trimesh`, `webdataset`) into optional extras for faster CI.
+  - Add a lightweight CI lane for parser/compiler/tokenizer tests without GPU stack.
+  - Add version checks in CI to prevent future metadata drift.
+
 ---
 **Status**: Research Mode (Mechanistic Discovery)
 **License**: MIT
