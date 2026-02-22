@@ -167,6 +167,7 @@ def train_epoch(
     measurement_dropout: float = 0.3, # v6.6-F: Prevent observer resonance
     anchor_batch: dict = None, # v6.6-F Level 2: For invariant curvature
     fingerprint: FeatureFingerprint = None, # v6.6-F Level 3: Mechanistic Identity
+    semantics: SemanticsEngine = None, # v6.6-F Level 4: Semantic Topology
 ) -> dict:
     """Run one training epoch. Returns dict of average losses."""
     model.train()
@@ -193,6 +194,7 @@ def train_epoch(
     total_sharpness = 0.0
     total_delta_dist = 0.0 
     total_shadow_delta = 0.0 # v6.6-F Level 3
+    total_flux = 0.0 # v6.6-F Level 4
     shadow_counts = 0
     
     n_batches = 0
@@ -259,6 +261,10 @@ def train_epoch(
         # v6.6-F Level 3: Feature Fingerprinting (Representational Invariants)
         if fingerprint is not None and hasattr(model, 'last_hidden_state') and should_measure:
              _ = fingerprint.update(model.last_hidden_state.detach())
+        
+        # v6.6-F Level 4: Semantic Topology Flux (Gauss-Bonnet)
+        if semantics is not None and should_measure:
+             total_flux += semantics.compute_flux(tgt_tokens[:, :, 0])
         
         B, T, _ = tgt_tokens.shape
         V = logits_type.shape[-1]
@@ -484,6 +490,7 @@ def train_epoch(
         "sharpness": total_sharpness / max(n_batches, 1),
         "delta_dist": total_delta_dist,
         "shadow_delta": total_shadow_delta / max(shadow_counts, 1) if shadow_counts > 0 else 0.0,
+        "flux": total_flux / max(n_batches, 1),
     }
     
     # Reset tracking variables for next epoch
@@ -752,6 +759,7 @@ def train(
     intervention_engine = InterventionEngine(model)
     null_suite = NullEmergenceSuite(mode=os.environ.get("AK_NULL_MODE", "real"))
     fingerprint = FeatureFingerprint(top_k=5) # v6.6-F Level 3
+    semantics = SemanticsEngine(VOCAB) # v6.6-F Level 4
     
     # Null Mode setup
     if null_suite.mode != "real":
@@ -869,7 +877,7 @@ def train(
             epoch=epoch, tension_weight=tension_weight, portrait=portrait,
             intervention_engine=intervention_engine, null_suite=null_suite,
             probe_pool=probe_pool, measurement_dropout=0.3, anchor_batch=anchor_batch,
-            fingerprint=fingerprint
+            fingerprint=fingerprint, semantics=semantics
         )
 
         # Update Anchors (v6.6-F Level 2)
@@ -894,6 +902,9 @@ def train(
 
         # v6.6-F Level 3: Feature Identity Stability
         train_metrics["fingerprint_stability"] = fingerprint.get_stability()
+        
+        # v6.6-F Level 4: Semantic Violation
+        train_metrics["semantics_violation"] = semantics.get_violation(target_flux=6.0) # MR6 Growth
         
         # v6.6-F: Failure Monitor (Automated Rejection by Scientific Control)
         # If we are in 'real' mode, we compare against a virtual or previous null baseline

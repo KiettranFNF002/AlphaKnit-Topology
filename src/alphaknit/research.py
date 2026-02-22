@@ -318,6 +318,43 @@ class FeatureFingerprint:
         return np.mean(self.persistence[-3:]) # Last 3 checks
 
 
+class SemanticsEngine:
+    """
+    v6.6-F Level 4: Semantic Topology.
+    Analyzes the "Gauss-Bonnet" invariant of the crochet topology.
+    Tracks net curvature flux (sum(inc) - sum(dec)).
+    """
+    def __init__(self, vocab):
+        self.vocab = vocab
+        self.inc_id = vocab.get("inc", -1)
+        self.dec_id = vocab.get("dec", -1)
+        self.history = [] # Net curvature per batch
+
+    def compute_flux(self, tokens_batch):
+        """
+        Calculates the net curvature of a batch of token sequences.
+        Flux = count(inc) - count(dec)
+        """
+        if self.inc_id == -1 or self.dec_id == -1: return 0.0
+        
+        # tokens_batch: [B, T]
+        inc_mask = (tokens_batch == self.inc_id).float()
+        dec_mask = (tokens_batch == self.dec_id).float()
+        
+        net_flux = (inc_mask.sum(dim=1) - dec_mask.sum(dim=1)).mean().item()
+        self.history.append(net_flux)
+        return net_flux
+
+    def get_violation(self, target_flux=12.0):
+        """
+        Measures deviation from the ideal topological closure.
+        Standard amigurumi sphere (Magic Ring 6 base) requires ~12 net growth/shrink cycles.
+        """
+        if not self.history: return 0.0
+        # For emergence tracking, we look at the absolute error vs a 'known' primitive
+        return abs(self.history[-1] - target_flux)
+
+
 class EmergenceTracker:
     """
     Detects the "Crystallization Window" for post-peak checkpoint saving.
