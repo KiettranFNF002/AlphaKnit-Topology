@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: alphaknit-arigurumi
+Version: 6.6.1+g
+Summary: Mechanistic Discovery Engine for Amigurumi Topology
+Author-email: "T.A. Kiet" <akietakatak2705@gmail.com>
+License-File: LICENSE
+Requires-Dist: torch>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: pytest>=7.0.0
+Requires-Dist: scipy>=1.10.0
+Requires-Dist: trimesh>=3.20.0
+Requires-Dist: networkx>=3.0
+Requires-Dist: webdataset>=0.2.0
+Requires-Dist: tqdm>=4.65.0
+Requires-Dist: matplotlib>=3.7.0
+Provides-Extra: cuda
+Requires-Dist: ninja; extra == "cuda"
+Requires-Dist: triton; extra == "cuda"
+Dynamic: license-file
