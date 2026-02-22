@@ -236,21 +236,31 @@ def train_epoch(
         optimizer.zero_grad()
 
         # v6.6-F Level 2: Stochastic Interrogation (Poisson-like)
-        # Prevents model from syncing to deterministic observer schedule
         should_measure = np.random.random() > measurement_dropout
+
+        # v6.6-F Level 5: Shadow Pass RNG Conservation
+        # Save RNG state to ensure identical dropout/randomness in both passes
+        rng_state = torch.get_rng_state()
+        cuda_rng_state = None
+        if device.type == 'cuda':
+            cuda_rng_state = torch.cuda.get_rng_state(device)
 
         # Forward
         logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
         
-        # v6.6-F Level 3: Counterfactual Shadow Pass
-        # If interventions are active, we run a clean 'shadow' pass to measure causal delta
+        # v6.6-F Level 5: Shared-State Counterfactual
+        # If interventions are active, we run a clean 'shadow' pass with EXACT same state
         shadow_delta = 0.0
         if intervention_engine and intervention_engine.active_interventions and should_measure:
              intervention_engine.shadow_mode = True
+             
+             # Restore state for identity pass
+             torch.set_rng_state(rng_state)
+             if cuda_rng_state is not None:
+                 torch.cuda.set_rng_state(cuda_rng_state, device)
+                 
              with torch.no_grad():
-                  # Clean pass (No noise)
                   s_logits_type, _, _ = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
-                  # Calculate Norm of probability shift as Delta
                   p_real = torch.softmax(logits_type, dim=-1).detach()
                   p_shadow = torch.softmax(s_logits_type, dim=-1)
                   shadow_delta = torch.norm(p_real - p_shadow).item()
@@ -382,9 +392,19 @@ def train_epoch(
             lambda_density=0.1, report_only=True
         )
         
+        # v6.6-F Level 5: Differentiable Topology Loss (Gauss-Bonnet Pressure)
+        loss_topo = torch.tensor(0.0, device=device)
+        if semantics is not None:
+             # Ground truth flux from tokens
+             target_flux = semantics.compute_flux(tgt_tokens[:, :, 0])
+             # Differential flux from logits
+             soft_flux = semantics.compute_soft_flux(logits_type)
+             loss_topo = torch.abs(soft_flux - target_flux)
+             
         # Total Loss
+        lambda_topo = 0.2 # v6.6-F Level 5: Pressure weight
         loss_val = (1.0 * loss_type) + (0.3 * edge_weight * loss_parent) + (0.2 * loss_deg) + (0.01 * loss_dist)
-        loss_val = loss_val + (tension_weight * loss_tension) + (lambda_ttf * ttf_loss_val)
+        loss_val = loss_val + (tension_weight * loss_tension) + (lambda_ttf * ttf_loss_val) + (lambda_topo * loss_topo)
         
         # v6.1/6.6-F: Latent Capture with detachment
         if portrait is not None and hasattr(model, 'last_hidden_state') and should_measure:

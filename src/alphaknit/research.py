@@ -345,6 +345,22 @@ class SemanticsEngine:
         self.history.append(net_flux)
         return net_flux
 
+    def compute_soft_flux(self, logits_batch):
+        """
+        v6.6-F Level 5: Differentiable Topology.
+        Differentiable net curvature flux using softmax probabilities.
+        Flux_soft = sum_t P(inc)_t - sum_t P(dec)_t
+        """
+        if self.inc_id == -1 or self.dec_id == -1: return torch.tensor(0.0)
+        
+        # logits_batch: [B, T, V]
+        probs = torch.softmax(logits_batch, dim=-1)
+        inc_probs = probs[:, :, self.inc_id]
+        dec_probs = probs[:, :, self.dec_id]
+        
+        soft_flux = (inc_probs.sum(dim=1) - dec_probs.sum(dim=1)).mean()
+        return soft_flux
+
     def get_violation(self, target_flux=12.0):
         """
         Measures deviation from the ideal topological closure.
