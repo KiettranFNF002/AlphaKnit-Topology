@@ -1,8 +1,8 @@
 import math
 import numpy as np
 import pytest
-from src.alphaknit.compiler import KnittingCompiler
-from src.alphaknit.simulator import ForwardSimulator
+from alphaknit.compiler import KnittingCompiler
+from alphaknit.simulator import ForwardSimulator
 
 COMPILER = KnittingCompiler()
 SIM = ForwardSimulator(stitch_width=0.5, stitch_height=0.4)

@@ -53,10 +53,10 @@ def device():
 class TestPointNetEncoder:
 
     def test_output_shape(self):
-        enc = PointNetEncoder(d_model=64)
+        enc = PointNetEncoder(d_model=32)
         x = torch.randn(4, 128, 3)   # (B=4, N=128, 3)
         out = enc(x)
-        assert out.shape == (4, 64), f"Expected (4, 64), got {out.shape}"
+        assert out.shape == (4, 32), f"Expected (4, 32), got {out.shape}"
 
     def test_single_sample(self):
         enc = PointNetEncoder(d_model=32)
@@ -122,21 +122,24 @@ class TestKnittingDataset:
 
     def test_item_shapes(self, small_dataset):
         ds = KnittingDataset(small_dataset, n_points=64, max_seq_len=50)
-        pc, src, tgt = ds[0]
+        batch = ds[0]
+        pc, src, tgt = batch['point_cloud'], batch['src_tokens'], batch['tgt_tokens']
         assert pc.shape == (64, 3), f"pc shape: {pc.shape}"
         assert src.shape == (50, 3), f"src shape: {src.shape}"
         assert tgt.shape == (50, 3), f"tgt shape: {tgt.shape}"
 
     def test_item_dtypes(self, small_dataset):
         ds = KnittingDataset(small_dataset, n_points=64, max_seq_len=50)
-        pc, src, tgt = ds[0]
+        batch = ds[0]
+        pc, src, tgt = batch['point_cloud'], batch['src_tokens'], batch['tgt_tokens']
         assert pc.dtype == torch.float32
         assert src.dtype == torch.long
         assert tgt.dtype == torch.long
 
     def test_starts_with_sos(self, small_dataset):
         ds = KnittingDataset(small_dataset, n_points=64, max_seq_len=50)
-        _, src, _ = ds[0]
+        batch = ds[0]
+        src = batch['src_tokens']
         assert src[0, 0].item() == config.SOS_ID
 
     def test_make_dataloaders(self, small_dataset):

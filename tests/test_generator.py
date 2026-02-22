@@ -1,5 +1,5 @@
 import pytest
-from src.alphaknit.generator import AmigurumiGenerator
+from alphaknit.generator import AmigurumiGenerator
 
 def test_generator_structure():
     gen = AmigurumiGenerator(min_rows=5, max_rows=10)

@@ -1,5 +1,5 @@
 import pytest
-from src.alphaknit.parser import AmigurumiStackParser
+from alphaknit.parser import AmigurumiStackParser
 
 def test_parser_normalization():
     parser = AmigurumiStackParser()

@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 import torch
 
-from src.alphaknit import config
-from src.alphaknit.evaluator import Evaluator
-from src.alphaknit.inference import AlphaKnitPredictor
-from src.alphaknit.model import KnittingTransformer
-from src.alphaknit.knitting_dataset import KnittingDataset
+from alphaknit import config
+from alphaknit.evaluator import Evaluator
+from alphaknit.inference import AlphaKnitPredictor
+from alphaknit.model import KnittingTransformer
+from alphaknit.knitting_dataset import KnittingDataset
 
 
 # ------------------------------------------------------------------ #
@@ -24,7 +24,7 @@ def evaluator():
 
 @pytest.fixture
 def small_dataset(tmp_path):
-    from src.alphaknit.dataset_builder import DatasetBuilder
+    from alphaknit.dataset_builder import DatasetBuilder
     builder = DatasetBuilder(output_dir=str(tmp_path), min_rows=3, max_rows=5)
     builder.build(n_samples=10, verbose=False)
     return KnittingDataset(str(tmp_path), n_points=64, max_seq_len=50)

@@ -405,10 +405,14 @@ class KnittingTransformer(nn.Module):
         return self.greedy_decode(point_cloud, max_len=max_len)[0]
 
     def ids_to_tokens(self, ids: list) -> list:
-        """Phase 9B: Convert tuple list to pseudo-string list for debug."""
+        """Phase 9B: Convert tuple list or ID list to pseudo-string list for debug."""
         res = []
-        for tpl in ids:
-            t_id, p1, p2 = tpl
-            t_str = config.ID_TO_TOKEN.get(t_id, "<UNK>")
-            res.append(f"{t_str}({p1},{p2})")
+        for item in ids:
+            if isinstance(item, (tuple, list)):
+                t_id, p1, p2 = item
+                t_str = config.ID_TO_TOKEN.get(t_id, "<UNK>")
+                res.append(f"{t_str}({p1},{p2})")
+            else:
+                # Fallback for legacy ID lists
+                res.append(config.ID_TO_TOKEN.get(item, "<UNK>"))
         return res

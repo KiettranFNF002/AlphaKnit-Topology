@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import tempfile
 
-from src.alphaknit.dataset_builder import DatasetBuilder, classify_shape
+from alphaknit.dataset_builder import DatasetBuilder, classify_shape
 
 
 class TestClassifyShape:
@@ -46,7 +46,7 @@ class TestDatasetBuilder:
     def test_samples_have_required_keys(self, tmp_path):
         builder = DatasetBuilder(output_dir=str(tmp_path), min_rows=3, max_rows=6)
         samples = builder.build(n_samples=3, verbose=False)
-        required = {"id", "flat_sequence", "canonical_sequence",
+        required = {"id", "edge_sequence",
                     "stitch_counts_per_row", "n_stitches", "n_rows",
                     "is_closed", "shape_class"}
         for s in samples:
@@ -80,5 +80,5 @@ class TestDatasetBuilder:
             with open(json_path) as f:
                 data = json.load(f)
             assert data["id"] == s["id"]
-            assert isinstance(data["flat_sequence"], list)
+            assert isinstance(data["edge_sequence"], list)
             assert isinstance(data["n_stitches"], int)

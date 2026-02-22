@@ -1,6 +1,6 @@
 import pytest
 import os
-from src.alphaknit.tokenizer import AmigurumiTokenizer
+from alphaknit.tokenizer import AmigurumiTokenizer
 
 def test_tokenizer_encoding():
     tokenizer = AmigurumiTokenizer()

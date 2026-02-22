@@ -28,19 +28,23 @@ class Evaluator:
     #  Individual metrics                                                  #
     # ------------------------------------------------------------------ #
 
-    def token_accuracy(self, pred_ids: List[int], gt_ids: List[int]) -> float:
+    def token_accuracy(self, pred_ids: List, gt_ids: List) -> float:
         """
-        Position-by-position token accuracy, aligned to the shorter sequence.
-
-        Returns:
-            float in [0, 1]
+        Position-by-position token accuracy.
+        Supports both ID lists and tuple/list lists.
         """
         if not gt_ids:
             return 1.0 if not pred_ids else 0.0
-        length = min(len(pred_ids), len(gt_ids))
-        correct = sum(p == g for p, g in zip(pred_ids[:length], gt_ids[:length]))
-        # Penalise length mismatch
-        total = max(len(pred_ids), len(gt_ids))
+
+        def to_tpl(seq):
+            return [tuple(x) if isinstance(x, (list, tuple, np.ndarray)) else x for x in seq]
+
+        p_tpl = to_tpl(pred_ids)
+        g_tpl = to_tpl(gt_ids)
+
+        length = min(len(p_tpl), len(g_tpl))
+        correct = sum(p == g for p, g in zip(p_tpl[:length], g_tpl[:length]))
+        total = max(len(p_tpl), len(g_tpl))
         return correct / total if total > 0 else 1.0
 
     def stitch_count_mae(
@@ -73,16 +77,22 @@ class Evaluator:
     def edit_distance(self, pred: List, gt: List) -> int:
         """
         Levenshtein edit distance between two sequences.
-        Works on token id lists or token string lists.
+        Supports tokens as tuples, lists, or strings.
         """
-        m, n = len(pred), len(gt)
+        def to_tpl(seq):
+            return [tuple(x) if isinstance(x, (list, tuple, np.ndarray)) else x for x in seq]
+            
+        p = to_tpl(pred)
+        g = to_tpl(gt)
+
+        m, n = len(p), len(g)
         # DP table
         dp = list(range(n + 1))
         for i in range(1, m + 1):
             prev = dp[:]
             dp[0] = i
             for j in range(1, n + 1):
-                if pred[i - 1] == gt[j - 1]:
+                if p[i - 1] == g[j - 1]:
                     dp[j] = prev[j - 1]
                 else:
                     dp[j] = 1 + min(prev[j], dp[j - 1], prev[j - 1])
@@ -147,7 +157,8 @@ class Evaluator:
         chamfers   = []
 
         for i in range(n_samples):
-            pc, src, tgt = dataset[i]
+            batch = dataset[i]
+            pc, src, tgt = batch['point_cloud'], batch['src_tokens'], batch['tgt_tokens']
             pc_batch = pc.unsqueeze(0).to(device)   # (1, N, 3)
 
             # Greedy decode

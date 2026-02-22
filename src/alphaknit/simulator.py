@@ -140,9 +140,9 @@ class ForwardSimulator:
         rows = sorted(counts.keys())
 
         if len(rows) < 2:
-            # Only one row — return a point cloud as a degenerate mesh
+            # Only one row — return a degenerate mesh instead of PointCloud for API consistency
             verts = np.array(list(positions.values()), dtype=np.float64)
-            return trimesh.PointCloud(verts)
+            return trimesh.Trimesh(vertices=verts, faces=[], process=False)
 
         vertices = []
         vert_index = {}  # stitch_id → vertex index
@@ -208,7 +208,7 @@ class ForwardSimulator:
 
         if not faces:
             verts = np.array(list(positions.values()), dtype=np.float64)
-            return trimesh.PointCloud(verts)
+            return trimesh.Trimesh(vertices=verts, faces=[], process=False)
 
         faces = np.array(faces, dtype=np.int64)
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)

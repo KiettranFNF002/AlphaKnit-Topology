@@ -25,7 +25,7 @@ from .model import KnittingTransformer
 from .knitting_dataset import make_dataloaders
 
 # AlphaKnit v6.6-F: The Blind Discovery Engine
-from alphaknit.research import compute_phase_lag, LatentPhasePortrait, EmergenceTracker, HiddenProbePool, ModelRealityAnchors
+from alphaknit.research import compute_phase_lag, LatentPhasePortrait, EmergenceTracker, HiddenProbePool, ModelRealityAnchors, FeatureFingerprint, SemanticsEngine
 from alphaknit.metrics import topology_tension_field, compute_structural_metrics, FunctionalSharpness
 from alphaknit.scientific import HypothesisEngine, InterventionEngine, NullEmergenceSuite
 
@@ -178,6 +178,8 @@ def train_epoch(
     if not hasattr(train_epoch, "epoch_prob_p1_acc"): setattr(train_epoch, "epoch_prob_p1_acc", torch.zeros(200, device=device))
     if not hasattr(train_epoch, "epoch_prob_p2_acc"): setattr(train_epoch, "epoch_prob_p2_acc", torch.zeros(200, device=device))
     if not hasattr(train_epoch, "epoch_valid_batches"): setattr(train_epoch, "epoch_valid_batches", 0)
+    if not hasattr(train_epoch, "epoch_argmax_p1_hist"): 
+        setattr(train_epoch, "epoch_argmax_p1_hist", torch.zeros(200, device=device))
     if not hasattr(train_epoch, "epoch_argmax_p2_hist"): 
         setattr(train_epoch, "epoch_argmax_p2_hist", torch.zeros(200, device=device))
     
@@ -234,9 +236,10 @@ def train_epoch(
 
         pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)
         optimizer.zero_grad()
-
-        # v6.6-F Level 2: Stochastic Interrogation (Poisson-like)
         should_measure = np.random.random() > measurement_dropout
+
+        # v6.6-G: Execution Step (The Primary Trajectory)
+        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
 
         # v6.6-G Level 5: True Counterfactual (fork_rng)
         shadow_delta = 0.0

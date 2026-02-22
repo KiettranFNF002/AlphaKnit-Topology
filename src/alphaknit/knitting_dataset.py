@@ -76,11 +76,11 @@ class KnittingDataset(Dataset):
         src = src + [pad_tuple] * (self.max_seq_len - len(src))
         tgt = tgt + [pad_tuple] * (self.max_seq_len - len(tgt))
 
-        return (
-            torch.tensor(pc, dtype=torch.float32),
-            torch.tensor(src, dtype=torch.long),
-            torch.tensor(tgt, dtype=torch.long),
-        )
+        return {
+            'point_cloud': torch.tensor(pc, dtype=torch.float32),
+            'src_tokens':  torch.tensor(src, dtype=torch.long),
+            'tgt_tokens':  torch.tensor(tgt, dtype=torch.long),
+        }
 
     # ------------------------------------------------------------------ #
     #  Helpers                                                             #
