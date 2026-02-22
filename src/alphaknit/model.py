@@ -99,24 +99,14 @@ class PointNetEncoder(nn.Module):
         y_norm = (y - y_min) / (y_max - y_min + 1e-6)
         y_buckets = (y_norm * 10).long()
         
-        # Calculate centroids per bucket
-        # We will just broadcast and compute weighted centers.
-        # To avoid slow loops, we compute a global center for now, 
-        # but weighting by Y proximity could act as a local center.
-        # Let's compute a simple running local center using a Gaussian kernel over Y.
-        
-        # For simplicity and speed, let's use the slice median as center.
-        x_centers = torch.zeros(B, N, device=device)
-        z_centers = torch.zeros(B, N, device=device)
-        
-        for b in range(B):
-            for i in range(11):
-                mask = (y_buckets[b] == i)
-                if mask.any():
-                    cx = x[b, mask, 0].mean()
-                    cz = x[b, mask, 2].mean()
-                    x_centers[b, mask] = cx
-                    z_centers[b, mask] = cz
+        # Calculate centroids per bucket (vectorized, no Python loops)
+        y_buckets = y_buckets.clamp(0, 10)
+        bucket_one_hot = F.one_hot(y_buckets, num_classes=11).to(x.dtype)  # (B, N, 11)
+        bucket_counts = bucket_one_hot.sum(dim=1).clamp_min(1.0)           # (B, 11)
+        x_bucket_means = (bucket_one_hot * x[:, :, 0:1]).sum(dim=1) / bucket_counts
+        z_bucket_means = (bucket_one_hot * x[:, :, 2:3]).sum(dim=1) / bucket_counts
+        x_centers = torch.gather(x_bucket_means, dim=1, index=y_buckets)
+        z_centers = torch.gather(z_bucket_means, dim=1, index=y_buckets)
                     
         dx = x[:, :, 0] - x_centers
         dz = x[:, :, 2] - z_centers
@@ -312,10 +302,11 @@ class KnittingTransformer(nn.Module):
         
         finished = [False] * B
 
+        memory = self.point_encoder(point_cloud).unsqueeze(1)
+
         for step in range(max_len):
             # 1. Forward pass to get Type logits
             # `generated` has shape (B, T, 3). We only need the last step's logits.
-            memory = self.point_encoder(point_cloud).unsqueeze(1)
             
             types = generated[:, :, 0]
             p1s = generated[:, :, 1]

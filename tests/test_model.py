@@ -70,6 +70,13 @@ class TestPointNetEncoder:
         out = enc(x)
         assert torch.all(torch.isfinite(out))
 
+    def test_output_finite_constant_height(self):
+        enc = PointNetEncoder(d_model=32)
+        x = torch.randn(2, 64, 3)
+        x[:, :, 1] = 0.0
+        out = enc(x)
+        assert torch.all(torch.isfinite(out))
+
 
 # ------------------------------------------------------------------ #
 #  KnittingTransformer                                                 #
@@ -108,6 +115,21 @@ class TestKnittingTransformer:
         ids = [config.VOCAB["mr_6"], config.VOCAB["sc"], config.VOCAB["inc"]]
         tokens = model.ids_to_tokens(ids)
         assert tokens == ["mr_6", "sc", "inc"]
+
+    def test_greedy_decode_encodes_point_cloud_once(self):
+        torch.manual_seed(0)
+        model = KnittingTransformer(d_model=32, n_heads=2, n_layers=1, ffn_dim=64, max_seq_len=30)
+        pc = torch.randn(1, 64, 3)
+        call_count = {"n": 0}
+        original_forward = model.point_encoder.forward
+
+        def counting_forward(*args, **kwargs):
+            call_count["n"] += 1
+            return original_forward(*args, **kwargs)
+
+        model.point_encoder.forward = counting_forward
+        model.greedy_decode(pc, max_len=10)
+        assert call_count["n"] == 1
 
 
 # ------------------------------------------------------------------ #
