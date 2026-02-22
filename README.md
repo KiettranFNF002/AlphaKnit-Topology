@@ -1,33 +1,45 @@
-# AlphaKnit 🧶 — v6.6-F "The Blind Discovery"
+# AlphaKnit 🧶 — v6.6-F "Mechanistic Discovery"
 
-AlphaKnit is a research-grade Constructive Structural AI that translates 3D point clouds into valid, compilable knitting and amigurumi patterns. 
+AlphaKnit is a **Mechanistic Discovery Engine** designed to solve the physics of **Amigurumi Topology**. It reframes Machine Learning not as a pattern generator, but as a scientific instrument for exploring geometric morphogenesis.
 
-This version (**v6.6-F**) introduces the **Blind Discovery Engine**, a scientific framework for verifying topological emergence through causal falsification, hidden probes, and state-aware observers.
+This version (**v6.6-F**) implements 5 levels of scientific grounding to verify topological emergence and eliminate observer-induced causality illusions.
 
-## 🚀 Key Features (v6.6-F)
+## 🔬 5 Levels of Scientific Grounding
 
-- **Causal Intervention Engine**: Injects topological noise or rank-clipping to verify structural causality.
-- **Hypothesis Falsification**: Automates the "Discovery" process by verifying the persistence of motifs across epochs.
-- **Null Emergence Suite**: Implements placebo-controlled training (Random Labels/Noise) to ensure genuine geometric learning.
-- **Observer Purity (Passive Bias)**: Decouples measurement from optimization using rotating probe pools.
-- **Topology Tension Field (TTF)**: A structural loss that encourages organization without direct supervision.
+1.  **Mechanical Truth**: Corrected dynamic layer indexing and isolated probe RNG states to prevent data leakage.
+2.  **Physical Invariants**: Implemented **Fixed Anchor Curvature** and **Optimizer Path-Length Persistence** to decouple measurements from training noise.
+3.  **Mechanistic Identity**: Introduced **Feature Fingerprints** (via SVD Persistence) to track representational invariants over time.
+4.  **Semantic Topology**: Implements the **Gauss-Bonnet Invariant** tracker to measure net curvature flux ($\sum inc - \sum dec$).
+5.  **The Scientific Instrument**: Embeds **Differentiable Topology Pressure** directly into the loss function, forcing the model to respect topological laws.
+
+## 🚀 Key Features
+
+- **Differentiable Gauss-Bonnet Loss**: Enforces curvature conservation via the gradient, closing syntax-only shortcuts.
+- **Shared-State Shadow Pass**: True counterfactual interventions using RNG-conserved twin passes to isolate causal signals.
+- **Topology Tension Field (TTF)**: Structural organization loss based on energetic minimization of the stitch manifold.
 
 ## 🏗️ Architecture
 
 ```mermaid
 graph TD
-    A["Point Cloud (N×3)"] --> B["PointNetEncoder (Multi-Scale)"]
-    B --> C["KnittingTransformer (Factorized Heads)"]
-    C --> D["Blind Discovery Engine (v6.6-F)"]
-    D --> E["Stitch Graph (Compiler Validated)"]
+    A["Point Cloud (Amigurumi Geometries)"] --> B["PointNetEncoder"]
+    B --> C["KnittingTransformer (Grounded Latents)"]
+    C --> D["Mechanistic Discovery Engine (v6.6-F)"]
+    D --> E["Gauss-Bonnet Constraints"]
+    E --> F["Compilable Stitch Pattern"]
 ```
+
+## 📊 Capability Milestones
+
+| Milestone | Indicator | Research Significance |
+| :--- | :--- | :--- |
+| **1. Grammar Barrier** | Violation < 2.0 | Model understands `inc`/`dec` as geometric operations. |
+| **2. Emergence Peak** | Stability > 0.8 | Model has formed stable internal directions for "Structure". |
+| **3. Morphogenesis** | Shadow Delta > 0.2 | Confirms causal mapping between neurons and physical laws. |
 
 ## 🛠️ Usage
 
-AlphaKnit v6.6-F is optimized for standalone execution on local workstations.
-
 ### 1. Installation
-Ensure you have Python 3.10+ and an NVIDIA GPU.
 ```cmd
 git clone https://github.com/KiettranFNF002/AlphaKnit-Topology.git
 cd AlphaKnit-Topology
@@ -35,32 +47,18 @@ cd AlphaKnit-Topology
 ```
 
 ### 2. Automated Research Pipeline
-The `run_pc.bat` script manages environment setup and transitions through training phases:
-1. **PHASE 1 (Grammar Warmup)**: Stabilizing entropy and syntax.
-2. **PHASE 2 (Transition)**: Selective Optimizer Reset & Physics Induction.
-3. **PHASE 3 (Mastery)**: Hypothesis testing and topological crystallization.
-
-## 📊 Ablation Studies (Research Benchmarks)
-
-AlphaKnit performance is measured by **Compile Success Rate (CSR)** and **Structural Fidelity**.
-
-| Variant | CSR (%) | Topology Fidelity | Note |
-|---------|---------|-------------------|------|
-| Baseline (v6.0) | 88.4% | Moderate | Sequence-only |
-| **v6.6-F (Blind)** | **94.2%** | **High** | With TTF + Causal |
-
-> [!NOTE]
-> Detailed ablation reports can be found in `research_reports/` after running the telemetry scripts.
+The pipeline transitions through 3 phases:
+1. **PHASE 1 (Syntax)**: Stabilizing grammar and entropy.
+2. **PHASE 2 (Transition)**: Inducing physical invariants and optimizer resets.
+3. **PHASE 3 (Crystallization)**: Emergence hunting via hypothesis testing.
 
 ## 🔬 Scientific Telemetry
-
-View research diagnostics and structural metrics:
+Track **Curvature Flux**, **Fingerprint Stability**, and **Structural Margin**:
 ```bash
 python scripts/plot_v6_telemetry.py --history checkpoints/training_history_v6.6F.json
 ```
-This tracks **Phase Lag**, **Rank Stability**, and **Structural Margin** in real-time.
 
 ---
-**Status**: Research Mode (Phase 11: Scientific Falsification)
+**Status**: Research Mode (Mechanistic Discovery)
 **License**: MIT
-**Build**: v6.6-F-impl-1 (Causal Hooks Integrated)
+**Build**: v6.6-F-impl-5 (Differentiable Topology Integrated)
