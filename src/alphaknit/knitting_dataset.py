@@ -116,9 +116,12 @@ def decode_and_extract(sample):
 
 def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
                      batch_size: int = config.BATCH_SIZE,
-                     num_workers: int = 0):
+                     num_workers: int | None = None):
     """Split dataset into train/val DataLoaders."""
     from torch.utils.data import DataLoader, random_split
+    use_cuda = torch.cuda.is_available()
+    if num_workers is None:
+        num_workers = 2 if use_cuda else 0
 
     # Check if dataset_dir is a WebDataset tar pattern
     if ".tar" in dataset_dir or "{" in dataset_dir:
@@ -148,7 +151,7 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
             .map(decode_and_extract)
             .batched(batch_size)
         )
-        loader_kwargs = {"pin_memory": torch.cuda.is_available()}
+        loader_kwargs = {"pin_memory": use_cuda}
         if num_workers > 0:
             loader_kwargs["prefetch_factor"] = 2
             
@@ -177,7 +180,7 @@ def make_dataloaders(dataset_dir: str, val_split: float = 0.1,
     )
 
     train_loader = DataLoader(train_ds, batch_size=batch_size,
-                              shuffle=True, num_workers=num_workers)
+                              shuffle=True, num_workers=num_workers, pin_memory=use_cuda)
     val_loader = DataLoader(val_ds, batch_size=batch_size,
-                            shuffle=False, num_workers=num_workers)
+                            shuffle=False, num_workers=num_workers, pin_memory=use_cuda)
     return train_loader, val_loader

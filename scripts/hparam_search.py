@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import json
 from src.alphaknit.train import train
 
-DATASET_DIR  = "data/processed/dataset_5k"
+DATASET_DIR  = "data/debug/dataset_5k"
 CHECKPOINT_DIR = "checkpoints"
 EPOCHS = 5
 

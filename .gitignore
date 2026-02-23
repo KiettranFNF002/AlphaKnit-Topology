@@ -20,13 +20,20 @@ build/
 .ipynb_checkpoints/
 
 # Dữ liệu nặng & Checkpoints (AlphaKnit specific)
-data/
+data/*
+!data/debug/
+data/debug/*
+!data/debug/dataset_5k/
+data/debug/dataset_5k/*
+!data/debug/dataset_5k/README.md
 checkpoints/
 *.pt
 *.npy
 *.pkl
 *.csv
 dataset_*/
+!data/debug/dataset_5k/
+!data/debug/dataset_5k/README.md
 *.obj
 test_output.txt
 

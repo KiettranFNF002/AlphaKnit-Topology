@@ -148,7 +148,7 @@ def train_phase9():
     
     print("Loading Data...")
     train_loader, val_loader = make_dataloaders(
-        dataset_dir="data/processed/dataset_5k", # Reusing Phase 8 data for now
+        dataset_dir="data/debug/dataset_5k", # Reusing debug data for audit runs
         batch_size=32,
         val_split=0.1
     )

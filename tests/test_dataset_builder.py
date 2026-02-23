@@ -82,3 +82,18 @@ class TestDatasetBuilder:
             assert data["id"] == s["id"]
             assert isinstance(data["edge_sequence"], list)
             assert isinstance(data["n_stitches"], int)
+            assert "generation_meta" in data
+
+    def test_seed_reproducibility(self, tmp_path):
+        out_a = tmp_path / "a"
+        out_b = tmp_path / "b"
+        samples_a = DatasetBuilder(output_dir=str(out_a), min_rows=3, max_rows=6, seed=123).build(n_samples=2, verbose=False)
+        samples_b = DatasetBuilder(output_dir=str(out_b), min_rows=3, max_rows=6, seed=123).build(n_samples=2, verbose=False)
+        assert [s["edge_sequence"] for s in samples_a] == [s["edge_sequence"] for s in samples_b]
+
+    def test_resume_generation_continues_ids(self, tmp_path):
+        builder = DatasetBuilder(output_dir=str(tmp_path), min_rows=3, max_rows=6, seed=7)
+        builder.build(n_samples=2, verbose=False)
+        resumed = builder.build(n_samples=2, verbose=False, resume=True)
+        assert resumed[0]["id"] == "sample_00002"
+        assert resumed[1]["id"] == "sample_00003"

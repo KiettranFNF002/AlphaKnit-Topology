@@ -5,7 +5,7 @@ from src.alphaknit.train import train
 
 print('Running quick 2-epoch smoke test...')
 history = train(
-    dataset_dir='data/processed/dataset_5k',
+    dataset_dir='data/debug/dataset_5k',
     checkpoint_dir='checkpoints',
     epochs=2,
     batch_size=32,

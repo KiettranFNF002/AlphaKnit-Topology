@@ -14,6 +14,7 @@ Pipeline per sample:
 import json
 import os
 import time
+import random
 import numpy as np
 
 from .generator_v2 import SpatialGeneratorV2
@@ -30,10 +31,12 @@ class DatasetBuilder:
         max_rows: int = 20,
         stitch_width: float = 0.5,
         stitch_height: float = 0.4,
+        seed: int = 42,
     ):
         self.output_dir = output_dir
         self.min_rows = min_rows
         self.max_rows = max_rows
+        self.seed = seed
 
         # Phase 9B: Edge-Action Generator + DAG construction
         self._gen = SpatialGeneratorV2(min_rows=min_rows, max_rows=max_rows)
@@ -46,7 +49,7 @@ class DatasetBuilder:
     #  Public API                                                          #
     # ------------------------------------------------------------------ #
 
-    def build(self, n_samples: int, verbose: bool = True) -> list:
+    def build(self, n_samples: int, verbose: bool = True, resume: bool = False) -> list:
         """
         Generate n_samples canonical samples and save to disk.
 
@@ -55,36 +58,55 @@ class DatasetBuilder:
         """
         samples = []
         skipped = 0
-        i = 0
+        existing_ids = []
+        if resume:
+            existing_ids = sorted(
+                f[:-5] for f in os.listdir(self.output_dir)
+                if f.endswith(".json") and f.startswith("sample_")
+            )
+        if existing_ids:
+            next_index = max(int(sid.split("_")[-1]) for sid in existing_ids) + 1
+        else:
+            next_index = 0
+        attempts = 0
 
         while len(samples) < n_samples:
-            sample = self._generate_one(len(samples))
+            attempts += 1
+            sample = self._generate_one(next_index + len(samples))
             if sample is None:
                 skipped += 1
                 if skipped > n_samples * 5:
                     print(f"Warning: too many skipped samples ({skipped}). Stopping early.")
                     break
                 continue
+            if not self._is_valid_sample(sample):
+                skipped += 1
+                continue
 
             # Save point cloud
             npy_path = os.path.join(self.output_dir, f"{sample['id']}.npy")
             np.save(npy_path, sample.pop("point_cloud"))
 
+            sample["generation_meta"] = {
+                "seed": self.seed,
+                "generated_at": int(time.time()),
+            }
             # Save metadata JSON
             json_path = os.path.join(self.output_dir, f"{sample['id']}.json")
             with open(json_path, "w") as f:
                 json.dump(sample, f, indent=2)
-
             samples.append(sample)
 
             if verbose and len(samples) % max(1, n_samples // 10) == 0:
                 print(f"  Generated {len(samples)}/{n_samples} samples...")
 
-        self._save_stats(samples)
+        self._save_stats(samples, skipped=skipped, attempts=attempts)
 
         if verbose:
             print(f"\nDone: {len(samples)} samples saved to '{self.output_dir}'")
             print(f"Skipped (invalid): {skipped}")
+            if attempts:
+                print(f"Invalid ratio: {skipped / attempts:.3f}")
 
         return samples
 
@@ -94,7 +116,11 @@ class DatasetBuilder:
 
     def _generate_one(self, idx: int) -> dict | None:
         """Generate and validate one sample. Returns None if invalid."""
+        py_state = random.getstate()
+        np_state = np.random.get_state()
         try:
+            random.seed(self.seed + idx)
+            np.random.seed(self.seed + idx)
             raw = self._gen.generate_pattern()
             edge_sequence = raw["edge_sequence"]
             row_data = raw["metadata"]
@@ -131,6 +157,17 @@ class DatasetBuilder:
 
         except Exception:
             return None
+        finally:
+            random.setstate(py_state)
+            np.random.set_state(np_state)
+
+    def _is_valid_sample(self, sample: dict) -> bool:
+        edge_sequence = sample.get("edge_sequence", [])
+        return (
+            bool(edge_sequence)
+            and sample.get("n_stitches", 0) > 0
+            and sample.get("n_rows", 0) > 0
+        )
 
     def _canonicalize_point_cloud(self, pc: np.ndarray) -> np.ndarray:
         """
@@ -188,7 +225,7 @@ class DatasetBuilder:
         pc_aligned = pc @ rot_y.T
         return pc_aligned
 
-    def _save_stats(self, samples: list):
+    def _save_stats(self, samples: list, skipped: int = 0, attempts: int = 0):
         """Save dataset statistics to dataset_stats.json."""
         if not samples:
             return
@@ -196,15 +233,20 @@ class DatasetBuilder:
         shape_counts = {}
         stitch_counts = []
         row_counts = []
+        edge_counts = []
 
         for s in samples:
             sc = s.get("shape_class", "other")
             shape_counts[sc] = shape_counts.get(sc, 0) + 1
             stitch_counts.append(s["n_stitches"])
             row_counts.append(s["n_rows"])
+            edge_counts.append(len(s.get("edge_sequence", [])))
 
         stats = {
             "total_samples": len(samples),
+            "avg_nodes": float(sum(stitch_counts) / len(stitch_counts)),
+            "avg_edges": float(sum(edge_counts) / len(edge_counts)),
+            "invalid_ratio": float(skipped / attempts) if attempts > 0 else 0.0,
             "shape_distribution": shape_counts,
             "stitch_count": {
                 "min": int(min(stitch_counts)),

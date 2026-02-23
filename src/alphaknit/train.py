@@ -212,9 +212,10 @@ def train_epoch(
         if null_suite:
             batch = null_suite.transform_batch(batch)
             
-        point_cloud = batch['point_cloud'].to(device) # (B, N, 3) 
-        src_tokens  = batch['src_tokens'].to(device)  # (B, T, 3)
-        tgt_tokens  = batch['tgt_tokens'].to(device)  # (B, T, 3)
+        non_blocking = device.type == "cuda"
+        point_cloud = batch['point_cloud'].to(device, non_blocking=non_blocking) # (B, N, 3) 
+        src_tokens  = batch['src_tokens'].to(device, non_blocking=non_blocking)  # (B, T, 3)
+        tgt_tokens  = batch['tgt_tokens'].to(device, non_blocking=non_blocking)  # (B, T, 3)
         if radius_scale > 0:
             point_cloud = point_cloud + (torch.randn_like(point_cloud) * radius_scale)
 
@@ -426,12 +427,12 @@ def train_epoch(
         if portrait is not None and anchor_batch is not None and should_measure:
             model.eval()
             with torch.no_grad():
-                a_pc = anchor_batch['point_cloud'].to(device)
-                a_src = anchor_batch['src_tokens'].to(device)
+                a_pc = anchor_batch['point_cloud'].to(device, non_blocking=non_blocking)
+                a_src = anchor_batch['src_tokens'].to(device, non_blocking=non_blocking)
                 a_mask = (a_src[:, :, 0] == config.PAD_ID)
                 _ = model(a_pc, a_src, tgt_key_padding_mask=a_mask)
                 if hasattr(model, 'last_hidden_state'):
-                    a_tgt = anchor_batch['tgt_tokens'].to(device)
+                    a_tgt = anchor_batch['tgt_tokens'].to(device, non_blocking=non_blocking)
                     # Simple structural mask for anchor
                     a_struct_mask = torch.zeros((a_pc.size(0), a_src.size(1)), dtype=torch.bool, device=device)
                     for sid in [4, 5, 6, 7]:
@@ -561,9 +562,10 @@ def evaluate(
     n_batches = 0
 
     for point_cloud, src_tokens, tgt_tokens in tqdm(loader, desc="Validation", leave=False):
-        point_cloud = point_cloud.to(device)
-        src_tokens  = src_tokens.to(device)
-        tgt_tokens  = tgt_tokens.to(device)
+        non_blocking = device.type == "cuda"
+        point_cloud = point_cloud.to(device, non_blocking=non_blocking)
+        src_tokens  = src_tokens.to(device, non_blocking=non_blocking)
+        tgt_tokens  = tgt_tokens.to(device, non_blocking=non_blocking)
 
         pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)
         logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
@@ -669,7 +671,7 @@ def compute_compile_success_rate(
     pbar = tqdm(loader, desc="Compiling", total=n_batches_max, leave=False)
     for i, (point_cloud, src_tokens, tgt_tokens) in enumerate(pbar):
         if i >= n_batches_max: break
-        point_cloud = point_cloud.to(device)
+        point_cloud = point_cloud.to(device, non_blocking=device.type == "cuda")
         pred_ids_list = model.greedy_decode(point_cloud, max_len=config.MAX_SEQ_LEN)
 
         for b, pred_ids in enumerate(pred_ids_list):
@@ -744,6 +746,15 @@ def train(
     else:
         device = torch.device(device_str)
     print(f"Training on: {device}")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+
+    train_path = os.path.normpath(dataset_dir).replace("\\", "/").lower()
+    train_parts = [part for part in train_path.split("/") if part]
+    has_dataset_5k = "dataset_5k" in train_parts
+    is_debug_path = "debug" in train_parts
+    assert not (has_dataset_5k and not is_debug_path), \
+        "dataset_5k is debug-only; move it under data/debug/dataset_5k."
 
     # Data
     train_loader, val_loader = make_dataloaders(
