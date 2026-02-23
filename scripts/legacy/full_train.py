@@ -1,4 +1,5 @@
 """
+LEGACY - DO NOT USE
 Full training run: trains the best config for 20 epochs with cosine LR.
 Edit BEST_CONFIG below to match the winner from hparam_search.py.
 """

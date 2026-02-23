@@ -52,6 +52,9 @@ The pipeline transitions through 3 phases:
 2. **PHASE 2 (Transition)**: Inducing physical invariants and optimizer resets.
 3. **PHASE 3 (Crystallization)**: Emergence hunting via hypothesis testing.
 
+Official training entrypoint: `python scripts/train_entrypoint.py`  
+Legacy scripts are archived under `scripts/legacy/` and marked `LEGACY - DO NOT USE`.
+
 ## 🔬 Scientific Telemetry
 Track **Curvature Flux**, **Fingerprint Stability**, and **Structural Margin**:
 ```bash

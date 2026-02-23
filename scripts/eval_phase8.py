@@ -82,7 +82,7 @@ def eval_model(predictor, dataset, n_samples=200, beam_widths=(1, 3)):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default="checkpoints/best_model_phase8.pt")
-    parser.add_argument("--dataset", default="data/processed/dataset_5k")
+    parser.add_argument("--dataset", default="data/debug/dataset_5k")
     parser.add_argument("--samples", type=int, default=200)
     parser.add_argument("--output", default="checkpoints/eval_phase8.json")
     parser.add_argument("--device", default="cpu")

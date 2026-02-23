@@ -1,4 +1,5 @@
 """
+LEGACY - DO NOT USE
 Phase 8 Training Script — Resume + 50 epochs
 
 Changes vs full_train.py:

@@ -13,7 +13,7 @@ def main():
     parser.add_argument("--samples", type=int, default=200)
     parser.add_argument("--output", type=str, default="checkpoints/eval_results.json")
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--dataset", type=str, default="data/processed/dataset_5k")
+    parser.add_argument("--dataset", type=str, default="data/debug/dataset_5k")
     args = parser.parse_args()
 
     # Load trained model
