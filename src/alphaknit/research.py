@@ -130,34 +130,46 @@ class HiddenProbePool:
         self.rotation_count += 1
         print(f"🔄 DECOUPLING: Probe Pool rotated to idx {self.active_idx}")
 
-        if not pool: return 0.0
-        
-        batch = self.get_batch()
+    def compute_pib(self, model, train_grads_dict, criterion, device):
+        """
+        Probe Interference Bias (PIB): measures how much the probe gradients
+        align with the training gradients. High alignment = instrument internalization.
+        """
+        pool = self.pools[self.active_idx]
+        if not pool:
+            return 0.0
+
+        raw = pool[np.random.randint(len(pool))]
+        # Normalize: WebDataset returns (pc, src, tgt) tuples
+        if isinstance(raw, (list, tuple)):
+            batch = {'point_cloud': raw[0], 'src_tokens': raw[1], 'tgt_tokens': raw[2]}
+        else:
+            batch = raw
+
         inputs = batch['point_cloud'].to(device)
-        targets = batch['type_labels'].to(device)
-        
-        # v6.6-F Grounding: Causal Isolation (RNG + RNG stats)
-        # Using model.eval() and random.fork_rng to prevent instrumentation interference
-        model.eval() 
+        src = batch['src_tokens'].to(device)
+
+        model.eval()
         with torch.random.fork_rng():
-            torch.manual_seed(42) # Consistent sampling for probe reliability
+            torch.manual_seed(42)
             model.zero_grad()
-            outputs = model(inputs, batch.get('src_tokens', None).to(device) if 'src_tokens' in batch else None)
-            # Reconstruct logits view safely
-            logits = outputs[0] if isinstance(outputs, tuple) else outputs
-            loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
+            pad_mask = (src[:, :, 0] == 0)
+            outputs = model(inputs, src, tgt_key_padding_mask=pad_mask)
+            logits_type = outputs[0] if isinstance(outputs, tuple) else outputs
+            tgt = batch['tgt_tokens'].to(device)
+            B, T, _ = tgt.shape
+            V = logits_type.shape[-1]
+            loss = criterion(logits_type.reshape(B * T, V), tgt[:, :, 0].reshape(B * T))
             loss.backward()
-        
+
         cos_sims = []
-        # Find last layer name dynamically
         last_layer_prefix = None
         for name, _ in model.named_parameters():
-             if "transformer.layers" in name:
-                 parts = name.split(".")
-                 # Assuming name is like transformer.layers.11.norm1.weight
-                 idx = int(parts[2])
-                 if last_layer_prefix is None or idx > int(last_layer_prefix.split(".")[-1]):
-                     last_layer_prefix = f"transformer.layers.{idx}"
+            if "transformer.layers" in name:
+                parts = name.split(".")
+                idx = int(parts[2])
+                if last_layer_prefix is None or idx > int(last_layer_prefix.split(".")[-1]):
+                    last_layer_prefix = f"transformer.layers.{idx}"
 
         for name, p in model.named_parameters():
             if last_layer_prefix and name.startswith(last_layer_prefix) and p.grad is not None and name in train_grads_dict:
@@ -165,13 +177,12 @@ class HiddenProbePool:
                 g_t = train_grads_dict[name].detach().flatten()
                 sim = torch.nn.functional.cosine_similarity(g_p.unsqueeze(0), g_t.unsqueeze(0))
                 cos_sims.append(sim.item())
-        
-        model.zero_grad() 
-        model.train() # Restore state
-        
-        model.zero_grad() # Clean up immediately
-        
-        if not cos_sims: return 0.0
+
+        model.zero_grad()
+        model.train()
+
+        if not cos_sims:
+            return 0.0
         return sum(cos_sims) / len(cos_sims)
 
 
