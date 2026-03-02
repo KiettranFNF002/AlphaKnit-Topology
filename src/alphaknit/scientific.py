@@ -129,6 +129,13 @@ class HypothesisEngine:
         """
         report = []
         for h in self.hypotheses:
+            # v6.6-G: Respect scientific rejection — do not overwrite
+            if h["status"] in ("REJECTED_BY_CONTROL", "FALSIFIED_BY_SHADOW"):
+                h["history"].append(h["status"])
+                name = str(h.get("name", "Unknown"))
+                report.append(f"{name}: {h['status']} ({h['path_traveled']:.2f}/{self.persistence_threshold:.2f})")
+                continue
+
             condition_fn = h.get("condition")
             is_met = False
             if callable(condition_fn):

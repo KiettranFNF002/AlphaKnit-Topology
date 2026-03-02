@@ -108,3 +108,60 @@ def test_feature_fingerprint_stability():
     h2 = torch.randn(2, 4, 10)
     s3 = fingerprint.update(h2)
     assert s3 < 0.5 or s3 < s2
+
+def test_rejected_status_survives_update():
+    """v6.6-G: Once rejected by Null Control or Shadow Path, update() must not overwrite back to VERIFIED."""
+    engine = HypothesisEngine(persistence_threshold=1.0)
+    engine.propose("Test_Hypo", "Desc", lambda m: m["acc"] > 0.8)
+    
+    # Step 1: Get to VERIFIED
+    engine.update({"acc": 0.9}, 2.0)
+    assert engine.hypotheses[0]["status"] == "VERIFIED"
+    
+    # Step 2: Reject via Shadow Path
+    engine.monitor_failure({"acc": 0.9, "epoch": 5}, {"struct_acc": 0.0}, shadow_delta=0.01)
+    assert engine.hypotheses[0]["status"] == "FALSIFIED_BY_SHADOW"
+    
+    # Step 3: Next update() should NOT overwrite back to VERIFIED
+    engine.update({"acc": 0.9}, 10.0)
+    assert engine.hypotheses[0]["status"] == "FALSIFIED_BY_SHADOW", \
+        "REJECTED status must survive subsequent update() calls"
+
+def test_rejected_by_control_survives_update():
+    """v6.6-G: Null Control rejection must persist across updates."""
+    engine = HypothesisEngine(persistence_threshold=1.0)
+    engine.propose("Test_Hypo", "Desc", lambda m: m["acc"] > 0.8)
+    
+    # Get to VERIFIED
+    engine.update({"acc": 0.9}, 2.0)
+    assert engine.hypotheses[0]["status"] == "VERIFIED"
+    
+    # Reject via Null Control (placebo shows high struct_acc)
+    engine.monitor_failure(
+        {"acc": 0.9, "struct_acc": 0.3, "epoch": 10},
+        {"struct_acc": 0.5},      # null > real * 1.5 → reject
+        shadow_delta=None
+    )
+    assert engine.hypotheses[0]["status"] == "REJECTED_BY_CONTROL"
+    
+    # Next update should not overwrite
+    engine.update({"acc": 0.99}, 100.0)
+    assert engine.hypotheses[0]["status"] == "REJECTED_BY_CONTROL"
+
+def test_monitor_failure_epoch_logging(capsys):
+    """v6.6-G: monitor_failure should print actual epoch, not '?'."""
+    engine = HypothesisEngine(persistence_threshold=1.0)
+    engine.propose("Test_Hypo", "Desc", lambda m: m["acc"] > 0.8)
+    engine.update({"acc": 0.9}, 2.0)
+    
+    # Pass epoch in real_metrics
+    engine.monitor_failure(
+        {"acc": 0.9, "struct_acc": 0.3, "epoch": 42},
+        {"struct_acc": 0.5},  # triggers rejection
+        shadow_delta=None
+    )
+    
+    captured = capsys.readouterr()
+    assert "epoch 42" in captured.out, f"Should print 'epoch 42', got: {captured.out}"
+    assert "epoch ?" not in captured.out, "Should not print 'epoch ?'"
+

@@ -957,7 +957,7 @@ def train(
         # Hypothesis Falsification Check (Grounded in Optimizer Distance)
         delta_dist = train_metrics.get("delta_dist", 0.0)
         shadow_delta = train_metrics.get("shadow_delta", 0.0)
-        hypo_reports = hypotheses.update(train_metrics, delta_dist)
+        hypotheses.update(train_metrics, delta_dist)
 
         # v6.6-F Level 3: Feature Identity Stability
         train_metrics["fingerprint_stability"] = fingerprint.get_stability()
@@ -965,6 +965,9 @@ def train(
         # v6.6-F Level 4: Semantic Violation
         train_metrics["semantics_violation"] = semantics.get_violation(target_flux=6.0) # MR6 Growth
         
+        # v6.6-G: Inject epoch for proper reporting in monitor_failure
+        train_metrics["epoch"] = epoch
+
         # v6.6-F: Failure Monitor (Automated Rejection by Scientific Control)
         # If we are in 'real' mode, we compare against a virtual or previous null baseline
         # Simplified: look for 'null_metrics.json' or use a conservative random baseline
@@ -975,11 +978,19 @@ def train(
                 with open(null_path) as f: null_metrics = json.load(f)
             except Exception: pass
             
-        hypotheses.monitor_failure(train_metrics, null_metrics, shadow_delta=shadow_delta)
+        # v6.6-G: Only pass shadow_delta when interventions are active
+        active_shadow = shadow_delta if (intervention_engine and intervention_engine.active_interventions) else None
+        hypotheses.monitor_failure(train_metrics, null_metrics, shadow_delta=active_shadow)
+
+        # v6.6-G: Generate reports AFTER monitor_failure for accurate final status
+        hypo_reports = []
+        for h in hypotheses.hypotheses:
+            name = str(h.get("name", "Unknown"))
+            hypo_reports.append(f"{name}: {h['status']} ({h['path_traveled']:.2f}/{hypotheses.persistence_threshold:.2f})")
 
         for rep in hypo_reports:
             if "VERIFIED" in rep: print(f"✅ DISCOVERY: {rep}")
-            if "REJECTED" in rep: print(f"⚠️ SCIENTIFIC REJECTION: {rep}")
+            if "REJECTED" in rep or "FALSIFIED" in rep: print(f"⚠️ SCIENTIFIC REJECTION: {rep}")
                                     
         # Calculate PDI
         if prev_epoch_probs is not None:
