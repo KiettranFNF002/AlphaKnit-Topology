@@ -44,8 +44,8 @@ st.sidebar.title("🧶 AlphaKnit Config")
 
 checkpoint_path = st.sidebar.text_input(
     "Model Checkpoint Path",
-    value="checkpoints/best_model_phase8.pt",
-    help="Phase 8 model uses multi-scale encoder — incompatible with old checkpoints"
+    value="checkpoints/best_model_colab_v6.6F.pt",
+    help="v6.6F model trained on Colab with WebDataset shards"
 )
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
