@@ -150,7 +150,7 @@ class PhaseDetector:
 def compute_topology_fields(tgt_tokens, pad_id=0):
     """
     Compute row_id, col_id, parent_col_id from (B, T, 3) token tensors.
-    Uses DAG-based row computation: row(t) = row(parent(t)) + 1.
+    Optimized O(T) vectorized version (avoids nested B*T loops).
     
     Args:
         tgt_tokens: (B, T, 3) — [type, p1_offset, p2_offset]
@@ -166,54 +166,73 @@ def compute_topology_fields(tgt_tokens, pad_id=0):
     p1 = tgt_tokens[:, :, 1]
     valid_mask = token_type != pad_id
     
-    # --- STEP 1: Compute parent indices ---
-    t_index = torch.arange(T, device=device).unsqueeze(0).expand(B, T)
-    parent_index = (t_index - p1).clamp(min=0)
-    
-    # --- STEP 2: Compute row_ids via iterative DAG propagation ---
+    # We can compute everything in a single pass of T since parent always precedes child
     row_ids = torch.zeros(B, T, dtype=torch.long, device=device)
-    mr_mask = (token_type == 4)  # mr_6 tokens
-    
-    for _ in range(64):  # max iterations = max depth
-        parent_rows = torch.gather(row_ids, 1, parent_index)
-        candidate = parent_rows + 1
-        candidate = torch.where(mr_mask, torch.zeros_like(candidate), candidate)
-        updated = torch.maximum(row_ids, candidate)
-        if torch.equal(updated, row_ids):
-            break
-        row_ids = updated
-    
-    row_ids = row_ids * valid_mask.long()
-    
-    # --- STEP 3: Compute col_ids ---
     col_ids = torch.zeros(B, T, dtype=torch.long, device=device)
-    for b in range(B):
-        max_row = row_ids[b].max().item()
-        row_cursor = torch.zeros(max_row + 1, dtype=torch.long, device=device)
-        for t in range(T):
-            ttype = token_type[b, t].item()
-            if ttype == pad_id:
-                break
-            r = row_ids[b, t].item()
-            col_ids[b, t] = row_cursor[r]
-            # Stitch contribution
-            if ttype == 6:    # inc → +2
-                row_cursor[r] += 2
-            elif ttype == 4:  # mr → +6
-                row_cursor[r] += 6
-            else:             # sc, dec → +1
-                row_cursor[r] += 1
+    parent_col_ids = torch.zeros(B, T, dtype=torch.long, device=device)
+    row_cursor = torch.zeros(B, 128, dtype=torch.long, device=device)  # up to 128 rows
     
-    # --- STEP 4: Compute parent_col_id ---
-    parent_col_ids = torch.gather(col_ids, 1, parent_index)
-    parent_col_ids = torch.where(mr_mask, torch.zeros_like(parent_col_ids), parent_col_ids)
+    # Pre-compute masks to avoid loop overhead
+    mr_mask = (token_type == 4)
+    inc_mask = (token_type == 6)
+    b_idx = torch.arange(B, device=device)
+    
+    for t in range(1, T): # t=0 is SOS, skip (all 0s)
+        # 1. Compute parent index for current token
+        p_offset = p1[:, t]
+        parent_t = (t - p_offset).clamp(min=0)
+        
+        # 2. Compute Row ID
+        # row(t) = row(parent) + 1
+        p_row = row_ids[b_idx, parent_t]
+        r = p_row + 1
+        
+        # mr_6 overrides row to 0
+        r_mr_mask = mr_mask[:, t]
+        if r_mr_mask.any():
+            r = torch.where(r_mr_mask, torch.zeros_like(r), r)
+        
+        # clamp to max 127 to match cursor size
+        r = r.clamp(0, 127)
+        row_ids[:, t] = r
+        
+        # 3. Compute Parent Col ID
+        # pcol(t) = col(parent)
+        p_col = col_ids[b_idx, parent_t]
+        if r_mr_mask.any():
+            p_col = torch.where(r_mr_mask, torch.zeros_like(p_col), p_col)
+        parent_col_ids[:, t] = p_col
+        
+        # 4. Compute Col ID
+        c = row_cursor[b_idx, r]
+        col_ids[:, t] = c
+        
+        # 5. Advance Cursor
+        ttype = token_type[:, t]
+        step = torch.ones(B, dtype=torch.long, device=device)
+        if inc_mask[:, t].any():
+            step[inc_mask[:, t]] = 2
+        
+        if r_mr_mask.any():
+            step[r_mr_mask] = 6
+            
+        # Do not advance cursor for padding, SOS, EOS
+        no_step_mask = (ttype == pad_id) | (ttype == 1) | (ttype == 2)
+        if no_step_mask.any():
+            step[no_step_mask] = 0
+            
+        row_cursor[b_idx, r] += step
+
+    row_ids = row_ids * valid_mask.long()
+    col_ids = col_ids * valid_mask.long()
+    parent_col_ids = parent_col_ids * valid_mask.long()
     
     # --- Assemble enriched tensor ---
     enriched = torch.zeros(B, T, 6, dtype=tgt_tokens.dtype, device=device)
-    enriched[:, :, 0] = tgt_tokens[:, :, 0]  # type
-    enriched[:, :, 1] = tgt_tokens[:, :, 1]  # p1
-    enriched[:, :, 2] = tgt_tokens[:, :, 2]  # p2
-    enriched[:, :, 3] = row_ids.clamp(0, 127)
+    enriched[:, :, 0] = token_type
+    enriched[:, :, 1] = p1
+    enriched[:, :, 2] = tgt_tokens[:, :, 2]
+    enriched[:, :, 3] = row_ids
     enriched[:, :, 4] = col_ids.clamp(0, 127)
     enriched[:, :, 5] = parent_col_ids.clamp(0, 127)
     
