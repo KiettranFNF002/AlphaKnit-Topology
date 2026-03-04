@@ -254,6 +254,7 @@ def train_epoch(
     criterion: nn.Module,        # Type loss criterion
     criterion_p: nn.Module,      # Parent loss criterion (ignore_index=0)
     device: torch.device,
+    scaler: torch.amp.GradScaler = None, # v7.0.4: AMP scaler
     grad_clip: float = config.GRAD_CLIP,
     edge_weight: float = 1.0,    # Phase 9B Curriculum control
     sector_weight: float = 0.0,  # Phase 9B Curriculum control
@@ -360,7 +361,8 @@ def train_epoch(
         tgt_tokens_enriched = compute_topology_fields(tgt_tokens, pad_id=config.PAD_ID)
 
         # v6.6-G: Execution Step (The Primary Trajectory)
-        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
+        with torch.autocast(device_type=device.type, enabled=scaler is not None):
+            logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
 
         # v6.6-G Level 5: True Counterfactual (fork_rng)
         shadow_delta = 0.0
@@ -370,7 +372,8 @@ def train_epoch(
                   # This pass is 'Clean' (No intervention noise)
                   intervention_engine.shadow_mode = True
                   with torch.no_grad():
-                       s_logits_type, _, _ = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
+                       with torch.autocast(device_type=device.type, enabled=scaler is not None):
+                            s_logits_type, _, _ = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
                   intervention_engine.shadow_mode = False
                   
                   p_real = torch.softmax(logits_type, dim=-1).detach()
@@ -543,7 +546,8 @@ def train_epoch(
                 a_src = anchor_batch['src_tokens'].to(device, non_blocking=non_blocking)
                 a_mask = (a_src[:, :, 0] == config.PAD_ID)
                 a_src_enriched = compute_topology_fields(a_src, pad_id=config.PAD_ID)
-                _ = model(a_pc, a_src_enriched, tgt_key_padding_mask=a_mask)
+                with torch.autocast(device_type=device.type, enabled=scaler is not None):
+                    _ = model(a_pc, a_src_enriched, tgt_key_padding_mask=a_mask)
                 if hasattr(model, 'last_hidden_state'):
                     a_tgt = anchor_batch['tgt_tokens'].to(device, non_blocking=non_blocking)
                     # Simple structural mask for anchor
@@ -574,13 +578,25 @@ def train_epoch(
 
         # Optimization Step
         loss = loss_val / grad_accum_steps
-        loss.backward()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+            
         if (n_batches + 1) % grad_accum_steps == 0:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             
             # v6.6-F Level 2: Track Optimizer Path Length (||delta theta||)
             params_before = torch.cat([p.detach().flatten() for p in model.parameters()]).clone()
-            optimizer.step()
+            
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+                
             params_after = torch.cat([p.detach().flatten() for p in model.parameters()])
             delta_dist = torch.norm(params_after - params_before).item()
             total_delta_dist += delta_dist
@@ -697,7 +713,8 @@ def evaluate(
         pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)
         # v7.0: Enrich tokens with topology
         src_tokens_enriched = compute_topology_fields(src_tokens, pad_id=config.PAD_ID)
-        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
+        with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+            logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
 
         B, T, _ = tgt_tokens.shape
         V = logits_type.shape[-1]
@@ -921,8 +938,16 @@ def train(
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
+    # v7.0.4: torch.compile for 10-30% speedup on PyTorch 2.x
+    if hasattr(torch, "compile") and device.type == "cuda":
+        print("⚡ Compiling model with torch.compile() for speed...")
+        model = torch.compile(model)
+
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    # v7.0.4: Mixed Precision (AMP) Scaler
+    scaler = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
 
     start_epoch = 1
     best_val_loss = float("inf")
@@ -1061,6 +1086,7 @@ def train(
 
         train_metrics = train_epoch(
             model, train_loader, optimizer, criterion, criterion_p, device, 
+            scaler=scaler,
             edge_weight=edge_weight, parent_noise_prob=parent_noise_prob, 
             grad_accum_steps=grad_accum_steps, prev_epoch_probs=prev_epoch_probs, 
             epoch=epoch, tension_weight=tension_weight, portrait=portrait,
