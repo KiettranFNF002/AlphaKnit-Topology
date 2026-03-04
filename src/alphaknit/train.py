@@ -947,7 +947,7 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # v7.0.4: Mixed Precision (AMP) Scaler
-    scaler = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
+    scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
 
     start_epoch = 1
     best_val_loss = float("inf")
