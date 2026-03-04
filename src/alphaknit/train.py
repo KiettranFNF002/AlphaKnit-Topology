@@ -144,6 +144,83 @@ class PhaseDetector:
 
 
 # ------------------------------------------------------------------ #
+#  v7.0: Topology-aware token enrichment                               #
+# ------------------------------------------------------------------ #
+
+def compute_topology_fields(tgt_tokens, pad_id=0):
+    """
+    Compute row_id, col_id, parent_col_id from (B, T, 3) token tensors.
+    Uses DAG-based row computation: row(t) = row(parent(t)) + 1.
+    
+    Args:
+        tgt_tokens: (B, T, 3) — [type, p1_offset, p2_offset]
+        pad_id: padding token id
+    
+    Returns:
+        enriched: (B, T, 6) — [type, p1, p2, row_id, col_id, parent_col_id]
+    """
+    B, T, _ = tgt_tokens.shape
+    device = tgt_tokens.device
+    
+    token_type = tgt_tokens[:, :, 0]
+    p1 = tgt_tokens[:, :, 1]
+    valid_mask = token_type != pad_id
+    
+    # --- STEP 1: Compute parent indices ---
+    t_index = torch.arange(T, device=device).unsqueeze(0).expand(B, T)
+    parent_index = (t_index - p1).clamp(min=0)
+    
+    # --- STEP 2: Compute row_ids via iterative DAG propagation ---
+    row_ids = torch.zeros(B, T, dtype=torch.long, device=device)
+    mr_mask = (token_type == 4)  # mr_6 tokens
+    
+    for _ in range(64):  # max iterations = max depth
+        parent_rows = torch.gather(row_ids, 1, parent_index)
+        candidate = parent_rows + 1
+        candidate = torch.where(mr_mask, torch.zeros_like(candidate), candidate)
+        updated = torch.maximum(row_ids, candidate)
+        if torch.equal(updated, row_ids):
+            break
+        row_ids = updated
+    
+    row_ids = row_ids * valid_mask.long()
+    
+    # --- STEP 3: Compute col_ids ---
+    col_ids = torch.zeros(B, T, dtype=torch.long, device=device)
+    for b in range(B):
+        max_row = row_ids[b].max().item()
+        row_cursor = torch.zeros(max_row + 1, dtype=torch.long, device=device)
+        for t in range(T):
+            ttype = token_type[b, t].item()
+            if ttype == pad_id:
+                break
+            r = row_ids[b, t].item()
+            col_ids[b, t] = row_cursor[r]
+            # Stitch contribution
+            if ttype == 6:    # inc → +2
+                row_cursor[r] += 2
+            elif ttype == 4:  # mr → +6
+                row_cursor[r] += 6
+            else:             # sc, dec → +1
+                row_cursor[r] += 1
+    
+    # --- STEP 4: Compute parent_col_id ---
+    parent_col_ids = torch.gather(col_ids, 1, parent_index)
+    parent_col_ids = torch.where(mr_mask, torch.zeros_like(parent_col_ids), parent_col_ids)
+    
+    # --- Assemble enriched tensor ---
+    enriched = torch.zeros(B, T, 6, dtype=tgt_tokens.dtype, device=device)
+    enriched[:, :, 0] = tgt_tokens[:, :, 0]  # type
+    enriched[:, :, 1] = tgt_tokens[:, :, 1]  # p1
+    enriched[:, :, 2] = tgt_tokens[:, :, 2]  # p2
+    enriched[:, :, 3] = row_ids.clamp(0, 63)
+    enriched[:, :, 4] = col_ids.clamp(0, 63)
+    enriched[:, :, 5] = parent_col_ids.clamp(0, 63)
+    
+    return enriched
+
+
+# ------------------------------------------------------------------ #
 #  Training epoch                                                      #
 # ------------------------------------------------------------------ #
 
@@ -204,6 +281,10 @@ def train_epoch(
     total_flux = 0.0 # v6.6-F Level 4
     total_l_curvature = 0.0 # v6.7-G
     shadow_counts = 0
+    # v7.0: Token distribution monitoring
+    total_inc_ratio = 0.0
+    total_dec_ratio = 0.0
+    total_sc_ratio = 0.0
     
     n_batches = 0
 
@@ -251,8 +332,12 @@ def train_epoch(
         optimizer.zero_grad()
         should_measure = np.random.random() > measurement_dropout
 
+        # v7.0: Enrich tokens with topology fields (B,T,3) → (B,T,6)
+        src_tokens_enriched = compute_topology_fields(src_tokens, pad_id=config.PAD_ID)
+        tgt_tokens_enriched = compute_topology_fields(tgt_tokens, pad_id=config.PAD_ID)
+
         # v6.6-G: Execution Step (The Primary Trajectory)
-        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
 
         # v6.6-G Level 5: True Counterfactual (fork_rng)
         shadow_delta = 0.0
@@ -262,7 +347,7 @@ def train_epoch(
                   # This pass is 'Clean' (No intervention noise)
                   intervention_engine.shadow_mode = True
                   with torch.no_grad():
-                       s_logits_type, _, _ = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+                       s_logits_type, _, _ = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
                   intervention_engine.shadow_mode = False
                   
                   p_real = torch.softmax(logits_type, dim=-1).detach()
@@ -434,7 +519,8 @@ def train_epoch(
                 a_pc = anchor_batch['point_cloud'].to(device, non_blocking=non_blocking)
                 a_src = anchor_batch['src_tokens'].to(device, non_blocking=non_blocking)
                 a_mask = (a_src[:, :, 0] == config.PAD_ID)
-                _ = model(a_pc, a_src, tgt_key_padding_mask=a_mask)
+                a_src_enriched = compute_topology_fields(a_src, pad_id=config.PAD_ID)
+                _ = model(a_pc, a_src_enriched, tgt_key_padding_mask=a_mask)
                 if hasattr(model, 'last_hidden_state'):
                     a_tgt = anchor_batch['tgt_tokens'].to(device, non_blocking=non_blocking)
                     # Simple structural mask for anchor
@@ -507,6 +593,16 @@ def train_epoch(
 
         n_batches += 1
 
+        # v7.0: Token distribution monitoring
+        with torch.no_grad():
+            pred_types = logits_type.reshape(B * T, V).argmax(dim=-1)
+            valid_pred = pred_types[tgt_type != config.PAD_ID]
+            if valid_pred.numel() > 0:
+                n_valid = valid_pred.numel()
+                total_inc_ratio += (valid_pred == 6).float().sum().item() / n_valid
+                total_dec_ratio += (valid_pred == 7).float().sum().item() / n_valid
+                total_sc_ratio  += (valid_pred == 5).float().sum().item() / n_valid
+
     ret = {
         "loss": total_loss / max(n_batches, 1),
         "l_type": total_l_type / max(n_batches, 1),
@@ -530,6 +626,10 @@ def train_epoch(
         "delta_dist": total_delta_dist,
         "shadow_delta": total_shadow_delta / max(shadow_counts, 1) if shadow_counts > 0 else 0.0,
         "flux": total_flux / max(n_batches, 1),
+        # v7.0: Token distribution monitoring
+        "inc_ratio": total_inc_ratio / max(n_batches, 1),
+        "dec_ratio": total_dec_ratio / max(n_batches, 1),
+        "sc_ratio": total_sc_ratio / max(n_batches, 1),
     }
     
     # Reset tracking variables for next epoch
@@ -572,7 +672,9 @@ def evaluate(
         tgt_tokens  = tgt_tokens.to(device, non_blocking=non_blocking)
 
         pad_mask = (src_tokens[:, :, 0] == config.PAD_ID)
-        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens, tgt_key_padding_mask=pad_mask)
+        # v7.0: Enrich tokens with topology
+        src_tokens_enriched = compute_topology_fields(src_tokens, pad_id=config.PAD_ID)
+        logits_type, logits_p1, logits_p2 = model(point_cloud, src_tokens_enriched, tgt_key_padding_mask=pad_mask)
 
         B, T, _ = tgt_tokens.shape
         V = logits_type.shape[-1]
@@ -870,10 +972,16 @@ def train(
         )
 
     # Loss Definition
+    # v7.0: Anti-collapse weights — downweight majority (sc), boost minority (inc/dec)
     class_weights = torch.ones(len(config.VOCAB), device=device)
-    class_weights[0] = 0.0 ; class_weights[1] = 0.1 ; class_weights[2] = 0.1
-    class_weights[7] = 0.5 ; class_weights[3] = 2.0 ; class_weights[4] = 3.0
-    class_weights[5] = 4.0 ; class_weights[6] = 4.0
+    class_weights[0] = 0.0   # <PAD>
+    class_weights[1] = 0.1   # <SOS>
+    class_weights[2] = 0.1   # <EOS>
+    class_weights[3] = 0.5   # <UNK>
+    class_weights[4] = 2.0   # mr_6
+    class_weights[5] = 0.7   # sc    — majority class, downweight
+    class_weights[6] = 2.0   # inc   — minority, boost
+    class_weights[7] = 2.0   # dec   — minority, boost
     
     criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=config.PAD_ID, label_smoothing=label_smoothing)
     criterion_p = nn.CrossEntropyLoss(ignore_index=0)

@@ -181,6 +181,11 @@ class KnittingTransformer(nn.Module):
         self.p2_emb = nn.Embedding(max_parent_offset, d_model, padding_idx=0)
         self.pos_emb = nn.Embedding(max_seq_len, d_model)
 
+        # v7.0: Topology-aware embeddings (anti-mode-collapse)
+        self.row_emb = nn.Embedding(64, d_model)         # row position in DAG
+        self.col_emb = nn.Embedding(64, d_model)          # column within row
+        self.parent_col_emb = nn.Embedding(64, d_model)   # parent's column in prev row
+
         # Transformer decoder layers
         decoder_layer = nn.TransformerDecoderLayer(
             d_model=d_model,
@@ -281,6 +286,13 @@ class KnittingTransformer(nn.Module):
         positions = torch.arange(T, device=tgt_tokens.device).unsqueeze(0)  # (1, T)
         tgt_emb = combined_emb + self.pos_emb(positions)      # (B, T, d_model)
 
+        # v7.0: Inject topology embeddings if available
+        if tgt_tokens.shape[-1] > 3 and hasattr(self, 'row_emb'):
+            row_ids = tgt_tokens[:, :, 3].clamp(0, 63)
+            col_ids = tgt_tokens[:, :, 4].clamp(0, 63)
+            pcol_ids = tgt_tokens[:, :, 5].clamp(0, 63)
+            tgt_emb = tgt_emb + self.row_emb(row_ids) + self.col_emb(col_ids) + self.parent_col_emb(pcol_ids)
+
         # Causal mask (prevent attending to future tokens)
         causal_mask = torch.zeros((T, T), dtype=tgt_emb.dtype, device=tgt_tokens.device)
         causal_mask = causal_mask.masked_fill(
@@ -346,10 +358,14 @@ class KnittingTransformer(nn.Module):
         B = point_cloud.shape[0]
         device = point_cloud.device
 
-        # Start with <SOS, 0, 0>
-        # Shape: (B, 1, 3)
-        generated = torch.zeros((B, 1, 3), dtype=torch.long, device=device)
+        # Start with <SOS, 0, 0, row=0, col=0, parent_col=0>
+        # Shape: (B, 1, 6) to carry topology info
+        generated = torch.zeros((B, 1, 6), dtype=torch.long, device=device)
         generated[:, 0, 0] = config.SOS_ID
+        
+        # v7.0: Track row state for on-the-fly topology
+        row_ids = torch.zeros(B, 1, dtype=torch.long, device=device)  # current row per token
+        col_cursors = torch.zeros(B, 64, dtype=torch.long, device=device)  # col cursor per row
         
         finished = [False] * B
 
@@ -357,8 +373,6 @@ class KnittingTransformer(nn.Module):
 
         for step in range(max_len):
             # 1. Forward pass to get Type logits
-            # `generated` has shape (B, T, 3). We only need the last step's logits.
-            
             types = generated[:, :, 0]
             p1s = generated[:, :, 1]
             p2s = generated[:, :, 2]
@@ -372,6 +386,13 @@ class KnittingTransformer(nn.Module):
             T = generated.shape[1]
             positions = torch.arange(T, device=device).unsqueeze(0)
             tgt_emb = combined_emb + self.pos_emb(positions)
+            
+            # v7.0: Inject topology embeddings during decode
+            if hasattr(self, 'row_emb'):
+                r_ids = generated[:, :, 3].clamp(0, 63)
+                c_ids = generated[:, :, 4].clamp(0, 63)
+                pc_ids = generated[:, :, 5].clamp(0, 63)
+                tgt_emb = tgt_emb + self.row_emb(r_ids) + self.col_emb(c_ids) + self.parent_col_emb(pc_ids)
             
             causal_mask = torch.triu(torch.ones((T, T), dtype=torch.bool, device=device), diagonal=1)
             
@@ -401,8 +422,37 @@ class KnittingTransformer(nn.Module):
             logits_p2 = self.p2_head(h_p2) # (B, 1, max_offset)
             next_p2 = logits_p2.argmax(dim=-1) # (B, 1)
             
-            # Combine
-            next_tuple = torch.stack([next_type, next_p1, next_p2], dim=-1) # (B, 1, 3)
+            # v7.0: Compute topology for this new token
+            next_row = torch.zeros(B, 1, dtype=torch.long, device=device)
+            next_col = torch.zeros(B, 1, dtype=torch.long, device=device)
+            next_pcol = torch.zeros(B, 1, dtype=torch.long, device=device)
+            
+            for b in range(B):
+                t_type = next_type[b, 0].item()
+                p1_val = next_p1[b, 0].item()
+                cur_t = generated.shape[1]  # current position (0-indexed)
+                
+                if t_type == 4:  # mr_6
+                    next_row[b, 0] = 0
+                    next_col[b, 0] = 0
+                    next_pcol[b, 0] = 0
+                else:
+                    parent_idx = max(0, cur_t - p1_val)
+                    p_row = generated[b, parent_idx, 3].item() if parent_idx < generated.shape[1] else 0
+                    p_col = generated[b, parent_idx, 4].item() if parent_idx < generated.shape[1] else 0
+                    new_row = min(p_row + 1, 63)
+                    next_row[b, 0] = new_row
+                    next_pcol[b, 0] = min(p_col, 63)
+                    # Col = current cursor for this row
+                    next_col[b, 0] = min(col_cursors[b, new_row].item(), 63)
+                    # Advance cursor
+                    if t_type == 6:  # inc → +2
+                        col_cursors[b, new_row] += 2
+                    else:  # sc, dec → +1
+                        col_cursors[b, new_row] += 1
+            
+            # Combine with topology
+            next_tuple = torch.stack([next_type, next_p1, next_p2, next_row, next_col, next_pcol], dim=-1) # (B, 1, 6)
             generated = torch.cat([generated, next_tuple], dim=1)
 
             for b in range(B):
@@ -413,9 +463,10 @@ class KnittingTransformer(nn.Module):
                 break
 
         # Convert to lists of tuples, strip <SOS> and <EOS>
+        # Only return (type, p1, p2) for downstream compatibility
         results = []
         for b in range(B):
-            seq = generated[b].tolist() # List of [type, p1, p2]
+            seq = generated[b].tolist() # List of [type, p1, p2, row, col, pcol]
             if seq and seq[0][0] == config.SOS_ID:
                 seq = seq[1:]
             
@@ -423,7 +474,7 @@ class KnittingTransformer(nn.Module):
             for tpl in seq:
                 if tpl[0] == config.EOS_ID:
                     break
-                clean_seq.append(tuple(tpl))
+                clean_seq.append(tuple(tpl[:3]))  # Only (type, p1, p2)
             results.append(clean_seq)
 
         return results
