@@ -1,10 +1,19 @@
-# AlphaKnit 🧶 — v6.6-G "Mechanistic Instrument"
+# AlphaKnit 🧶 — v7.0 "Anti-Collapse Architecture"
 
 AlphaKnit is a **Mechanistic Discovery Engine** designed to solve the physics of **Amigurumi Topology**. It reframes Machine Learning not as a pattern generator, but as a scientific instrument for exploring geometric morphogenesis.
 
-This version (**v6.6-G**) implements 5 levels of scientific grounding to verify topological emergence and eliminate observer-induced causality illusions.
+This version (**v7.0**) introduces the **Anti-Collapse Architecture** to solve the severe "flat-tube" mode collapse observed in v6.6, while retaining the 5 levels of scientific grounding from v6.6-F.
 
-## 🔬 5 Levels of Scientific Grounding
+## 🌟 What's New in v7.0 (Anti-Collapse)
+
+1. **Topology-Aware Embeddings**: Replaced naive grid parsing with DAG (Directed Acyclic Graph) traversal. Tokens are now enriched with `row_emb`, `col_emb`, and `parent_col_emb` directly in O(T), granting the model true structural depth perception.
+2. **Class Anti-Dominance Weights**: Rebalanced CrossEntropy with heavy penalties for structural shortcuts (`sc` token) and boosts for structural pivots (`inc`/`dec` tokens).
+3. **AMP & Triton Compilation**: Fully integrated `torch.amp` (Mixed Precision FP16) and PyTorch 2.x `torch.compile` to double the training throughput while computing heavier topological graphs.
+4. **Hot-Fixed AMP Autograd**: Resolved severe dtype mismatch bugs between Float16 `last_curvature_hint` attributes and Float32 Huber Loss targets during the Triton compilation graph execution.
+
+---
+
+## 🔬 5 Levels of Scientific Grounding (From v6.6-F)
 
 1.  **Mechanical Truth**: Corrected dynamic layer indexing and isolated probe RNG states to prevent data leakage.
 2.  **Physical Invariants**: Implemented **Fixed Anchor Curvature** and **Optimizer Path-Length Persistence** to decouple measurements from training noise.
