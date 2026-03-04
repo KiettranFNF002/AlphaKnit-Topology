@@ -150,7 +150,7 @@ class PhaseDetector:
 def compute_topology_fields(tgt_tokens, pad_id=0):
     """
     Compute row_id, col_id, parent_col_id from (B, T, 3) token tensors.
-    Optimized O(T) vectorized version (avoids nested B*T loops).
+    Runs on CPU to avoid CUDA kernel launch overhead for sequential ops.
     
     Args:
         tgt_tokens: (B, T, 3) — [type, p1_offset, p2_offset]
@@ -160,11 +160,15 @@ def compute_topology_fields(tgt_tokens, pad_id=0):
         enriched: (B, T, 6) — [type, p1, p2, row_id, col_id, parent_col_id]
     """
     B, T, _ = tgt_tokens.shape
-    device = tgt_tokens.device
+    orig_device = tgt_tokens.device
     
-    token_type = tgt_tokens[:, :, 0]
-    p1 = tgt_tokens[:, :, 1]
+    # Move to CPU for fast sequential integer ops
+    tgt_cpu = tgt_tokens.cpu()
+    
+    token_type = tgt_cpu[:, :, 0]
+    p1 = tgt_cpu[:, :, 1]
     valid_mask = token_type != pad_id
+    device = torch.device('cpu')
     
     # We can compute everything in a single pass of T since parent always precedes child
     row_ids = torch.zeros(B, T, dtype=torch.long, device=device)
@@ -228,15 +232,15 @@ def compute_topology_fields(tgt_tokens, pad_id=0):
     parent_col_ids = parent_col_ids * valid_mask.long()
     
     # --- Assemble enriched tensor ---
-    enriched = torch.zeros(B, T, 6, dtype=tgt_tokens.dtype, device=device)
+    enriched = torch.zeros(B, T, 6, dtype=tgt_cpu.dtype, device=device)
     enriched[:, :, 0] = token_type
     enriched[:, :, 1] = p1
-    enriched[:, :, 2] = tgt_tokens[:, :, 2]
+    enriched[:, :, 2] = tgt_cpu[:, :, 2]
     enriched[:, :, 3] = row_ids
     enriched[:, :, 4] = col_ids.clamp(0, 127)
     enriched[:, :, 5] = parent_col_ids.clamp(0, 127)
     
-    return enriched
+    return enriched.to(orig_device)
 
 
 # ------------------------------------------------------------------ #
