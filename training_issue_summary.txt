@@ -19,3 +19,148 @@ Hiện tượng "càng train lâu, loss có thể vẫn giảm hoặc đi ngang 
 - **Tăng Data Augmentation (Noise):** Làm khó model hơn bằng cách tăng `radius_scale` (làm nhiễu tọa độ 3D) và `parent_noise_prob` trong lúc train để ngăn chặn học vẹt.
 - **Tinh chỉnh lại hệ số Loss (Loss Balancing):** Cân nhắc tăng hệ số `0.01 * loss_dist` lên cao hơn ở nửa sau của quá trình train (ví dụ tăng lên 0.05 hoặc 0.1) để trừng phạt thật nặng các kết nối tạo ra mũi cha quá xa nhau. Mức độ `tension_weight` cũng nên được scale theo epoch.
 - **Tăng Dropout:** Thêm hoặc tăng `dropout` layer ở các Transformer block cuối để ép model phải dùng các đặc trưng robust hơn thay vì ghi nhớ bề mặt.
+
+test log:
+PS D:\Downloads\AlphaKnit-Amigurumi> python test_golden_validator.py
+Found 18 checkpoints. Starting batch validation...
+Generating a dummy sphere point cloud for consistent testing...
+
+============================================================
+ TESTING: golden_epoch_007.pt
+============================================================
+[ERROR] Critical failure testing golden_epoch_007.pt: Error(s) in loading state_dict for KnittingTransformer:
+        Missing key(s) in state_dict: "point_encoder.mlp.0.weight", "point_encoder.mlp.0.bias", "point_encoder.mlp.1.weight", "point_encoder.mlp.3.weight", "point_encoder.mlp.3.bias", "point_encoder.mlp.4.weight", "point_encoder.mlp.6.weight", "point_encoder.mlp.6.bias", "point_encoder.mlp.7.weight", "point_encoder.proj.weight", "point_encoder.proj.bias", "point_encoder.norm.weight", "point_encoder.norm.bias", "type_emb.weight", "p1_emb.weight", "p2_emb.weight", "pos_emb.weight", "row_emb.weight", "col_emb.weight", "parent_col_emb.weight", "decoder.layers.0.self_attn.in_proj_weight", "decoder.layers.0.self_attn.in_proj_bias", "decoder.layers.0.self_attn.out_proj.weight", "decoder.layers.0.self_attn.out_proj.bias", "decoder.layers.0.multihead_attn.in_proj_weight", "decoder.layers.0.multihead_attn.in_proj_bias", "decoder.layers.0.multihead_attn.out_proj.weight", "decoder.layers.0.multihead_attn.out_proj.bias", "decoder.layers.0.linear1.weight", "decoder.layers.0.linear1.bias", "decoder.layers.0.linear2.weight", "decoder.layers.0.linear2.bias", "decoder.layers.0.norm1.weight", "decoder.layers.0.norm1.bias", "decoder.layers.0.norm2.weight", "decoder.layers.0.norm2.bias", "decoder.layers.0.norm3.weight", "decoder.layers.0.norm3.bias", "decoder.layers.1.self_attn.in_proj_weight", "decoder.layers.1.self_attn.in_proj_bias", "decoder.layers.1.self_attn.out_proj.weight", "decoder.layers.1.self_attn.out_proj.bias", "decoder.layers.1.multihead_attn.in_proj_weight", "decoder.layers.1.multihead_attn.in_proj_bias", "decoder.layers.1.multihead_attn.out_proj.weight", "decoder.layers.1.multihead_attn.out_proj.bias", "decoder.layers.1.linear1.weight", "decoder.layers.1.linear1.bias", "decoder.layers.1.linear2.weight", "decoder.layers.1.linear2.bias", "decoder.layers.1.norm1.weight", "decoder.layers.1.norm1.bias", "decoder.layers.1.norm2.weight", "decoder.layers.1.norm2.bias", "decoder.layers.1.norm3.weight", "decoder.layers.1.norm3.bias", "decoder.layers.2.self_attn.in_proj_weight", "decoder.layers.2.self_attn.in_proj_bias", "decoder.layers.2.self_attn.out_proj.weight", "decoder.layers.2.self_attn.out_proj.bias", "decoder.layers.2.multihead_attn.in_proj_weight", "decoder.layers.2.multihead_attn.in_proj_bias", "decoder.layers.2.multihead_attn.out_proj.weight", "decoder.layers.2.multihead_attn.out_proj.bias", "decoder.layers.2.linear1.weight", "decoder.layers.2.linear1.bias", "decoder.layers.2.linear2.weight", "decoder.layers.2.linear2.bias", "decoder.layers.2.norm1.weight", "decoder.layers.2.norm1.bias", "decoder.layers.2.norm2.weight", "decoder.layers.2.norm2.bias", "decoder.layers.2.norm3.weight", "decoder.layers.2.norm3.bias", "type_head.weight", "type_head.bias", "p1_head.0.weight", "p1_head.0.bias", "p1_head.2.weight", "p1_head.2.bias", "p2_head.0.weight", "p2_head.0.bias", "p2_head.2.weight", "p2_head.2.bias", "curvature_head.weight", "curvature_head.bias".
+        Unexpected key(s) in state_dict: "_orig_mod.point_encoder.mlp.0.weight", "_orig_mod.point_encoder.mlp.0.bias", "_orig_mod.point_encoder.mlp.1.weight", "_orig_mod.point_encoder.mlp.3.weight", "_orig_mod.point_encoder.mlp.3.bias", "_orig_mod.point_encoder.mlp.4.weight", 
+"_orig_mod.point_encoder.mlp.6.weight", "_orig_mod.point_encoder.mlp.6.bias", "_orig_mod.point_encoder.mlp.7.weight", "_orig_mod.point_encoder.proj.weight", "_orig_mod.point_encoder.proj.bias", "_orig_mod.point_encoder.norm.weight", "_orig_mod.point_encoder.norm.bias", "_orig_mod.type_emb.weight", "_orig_mod.p1_emb.weight", "_orig_mod.p2_emb.weight", "_orig_mod.pos_emb.weight", "_orig_mod.row_emb.weight", "_orig_mod.col_emb.weight", "_orig_mod.parent_col_emb.weight", "_orig_mod.decoder.layers.0.self_attn.in_proj_weight", "_orig_mod.decoder.layers.0.self_attn.in_proj_bias", "_orig_mod.decoder.layers.0.self_attn.out_proj.weight", "_orig_mod.decoder.layers.0.self_attn.out_proj.bias", "_orig_mod.decoder.layers.0.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.0.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.0.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.0.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.0.linear1.weight", "_orig_mod.decoder.layers.0.linear1.bias", "_orig_mod.decoder.layers.0.linear2.weight", "_orig_mod.decoder.layers.0.linear2.bias", "_orig_mod.decoder.layers.0.norm1.weight", "_orig_mod.decoder.layers.0.norm1.bias", "_orig_mod.decoder.layers.0.norm2.weight", "_orig_mod.decoder.layers.0.norm2.bias", "_orig_mod.decoder.layers.0.norm3.weight", "_orig_mod.decoder.layers.0.norm3.bias", "_orig_mod.decoder.layers.1.self_attn.in_proj_weight", "_orig_mod.decoder.layers.1.self_attn.in_proj_bias", "_orig_mod.decoder.layers.1.self_attn.out_proj.weight", "_orig_mod.decoder.layers.1.self_attn.out_proj.bias", "_orig_mod.decoder.layers.1.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.1.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.1.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.1.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.1.linear1.weight", "_orig_mod.decoder.layers.1.linear1.bias", "_orig_mod.decoder.layers.1.linear2.weight", "_orig_mod.decoder.layers.1.linear2.bias", "_orig_mod.decoder.layers.1.norm1.weight", "_orig_mod.decoder.layers.1.norm1.bias", "_orig_mod.decoder.layers.1.norm2.weight", "_orig_mod.decoder.layers.1.norm2.bias", "_orig_mod.decoder.layers.1.norm3.weight", "_orig_mod.decoder.layers.1.norm3.bias", "_orig_mod.decoder.layers.2.self_attn.in_proj_weight", "_orig_mod.decoder.layers.2.self_attn.in_proj_bias", "_orig_mod.decoder.layers.2.self_attn.out_proj.weight", "_orig_mod.decoder.layers.2.self_attn.out_proj.bias", "_orig_mod.decoder.layers.2.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.2.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.2.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.2.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.2.linear1.weight", "_orig_mod.decoder.layers.2.linear1.bias", "_orig_mod.decoder.layers.2.linear2.weight", "_orig_mod.decoder.layers.2.linear2.bias", "_orig_mod.decoder.layers.2.norm1.weight", "_orig_mod.decoder.layers.2.norm1.bias", "_orig_mod.decoder.layers.2.norm2.weight", "_orig_mod.decoder.layers.2.norm2.bias", "_orig_mod.decoder.layers.2.norm3.weight", "_orig_mod.decoder.layers.2.norm3.bias", "_orig_mod.type_head.weight", "_orig_mod.type_head.bias", "_orig_mod.p1_head.0.weight", "_orig_mod.p1_head.0.bias", "_orig_mod.p1_head.2.weight", "_orig_mod.p1_head.2.bias", "_orig_mod.p2_head.0.weight", "_orig_mod.p2_head.0.bias", "_orig_mod.p2_head.2.weight", "_orig_mod.p2_head.2.bias", "_orig_mod.curvature_head.weight", "_orig_mod.curvature_head.bias".
+
+============================================================
+ TESTING: golden_epoch_008.pt
+============================================================
+[ERROR] Critical failure testing golden_epoch_008.pt: Error(s) in loading state_dict for KnittingTransformer:
+        Missing key(s) in state_dict: "point_encoder.mlp.0.weight", "point_encoder.mlp.0.bias", "point_encoder.mlp.1.weight", "point_encoder.mlp.3.weight", "point_encoder.mlp.3.bias", "point_encoder.mlp.4.weight", "point_encoder.mlp.6.weight", "point_encoder.mlp.6.bias", "point_encoder.mlp.7.weight", "point_encoder.proj.weight", "point_encoder.proj.bias", "point_encoder.norm.weight", "point_encoder.norm.bias", "type_emb.weight", "p1_emb.weight", "p2_emb.weight", "pos_emb.weight", "row_emb.weight", "col_emb.weight", "parent_col_emb.weight", "decoder.layers.0.self_attn.in_proj_weight", "decoder.layers.0.self_attn.in_proj_bias", "decoder.layers.0.self_attn.out_proj.weight", "decoder.layers.0.self_attn.out_proj.bias", "decoder.layers.0.multihead_attn.in_proj_weight", "decoder.layers.0.multihead_attn.in_proj_bias", "decoder.layers.0.multihead_attn.out_proj.weight", "decoder.layers.0.multihead_attn.out_proj.bias", "decoder.layers.0.linear1.weight", "decoder.layers.0.linear1.bias", "decoder.layers.0.linear2.weight", "decoder.layers.0.linear2.bias", "decoder.layers.0.norm1.weight", "decoder.layers.0.norm1.bias", "decoder.layers.0.norm2.weight", "decoder.layers.0.norm2.bias", "decoder.layers.0.norm3.weight", "decoder.layers.0.norm3.bias", "decoder.layers.1.self_attn.in_proj_weight", "decoder.layers.1.self_attn.in_proj_bias", "decoder.layers.1.self_attn.out_proj.weight", "decoder.layers.1.self_attn.out_proj.bias", "decoder.layers.1.multihead_attn.in_proj_weight", "decoder.layers.1.multihead_attn.in_proj_bias", "decoder.layers.1.multihead_attn.out_proj.weight", "decoder.layers.1.multihead_attn.out_proj.bias", "decoder.layers.1.linear1.weight", "decoder.layers.1.linear1.bias", "decoder.layers.1.linear2.weight", "decoder.layers.1.linear2.bias", "decoder.layers.1.norm1.weight", "decoder.layers.1.norm1.bias", "decoder.layers.1.norm2.weight", "decoder.layers.1.norm2.bias", "decoder.layers.1.norm3.weight", "decoder.layers.1.norm3.bias", "decoder.layers.2.self_attn.in_proj_weight", "decoder.layers.2.self_attn.in_proj_bias", "decoder.layers.2.self_attn.out_proj.weight", "decoder.layers.2.self_attn.out_proj.bias", "decoder.layers.2.multihead_attn.in_proj_weight", "decoder.layers.2.multihead_attn.in_proj_bias", "decoder.layers.2.multihead_attn.out_proj.weight", "decoder.layers.2.multihead_attn.out_proj.bias", "decoder.layers.2.linear1.weight", "decoder.layers.2.linear1.bias", "decoder.layers.2.linear2.weight", "decoder.layers.2.linear2.bias", "decoder.layers.2.norm1.weight", "decoder.layers.2.norm1.bias", "decoder.layers.2.norm2.weight", "decoder.layers.2.norm2.bias", "decoder.layers.2.norm3.weight", "decoder.layers.2.norm3.bias", "type_head.weight", "type_head.bias", "p1_head.0.weight", "p1_head.0.bias", "p1_head.2.weight", "p1_head.2.bias", "p2_head.0.weight", "p2_head.0.bias", "p2_head.2.weight", "p2_head.2.bias", "curvature_head.weight", "curvature_head.bias".
+        Unexpected key(s) in state_dict: "_orig_mod.point_encoder.mlp.0.weight", "_orig_mod.point_encoder.mlp.0.bias", "_orig_mod.point_encoder.mlp.1.weight", "_orig_mod.point_encoder.mlp.3.weight", "_orig_mod.point_encoder.mlp.3.bias", "_orig_mod.point_encoder.mlp.4.weight", 
+"_orig_mod.point_encoder.mlp.6.weight", "_orig_mod.point_encoder.mlp.6.bias", "_orig_mod.point_encoder.mlp.7.weight", "_orig_mod.point_encoder.proj.weight", "_orig_mod.point_encoder.proj.bias", "_orig_mod.point_encoder.norm.weight", "_orig_mod.point_encoder.norm.bias", "_orig_mod.type_emb.weight", "_orig_mod.p1_emb.weight", "_orig_mod.p2_emb.weight", "_orig_mod.pos_emb.weight", "_orig_mod.row_emb.weight", "_orig_mod.col_emb.weight", "_orig_mod.parent_col_emb.weight", "_orig_mod.decoder.layers.0.self_attn.in_proj_weight", "_orig_mod.decoder.layers.0.self_attn.in_proj_bias", "_orig_mod.decoder.layers.0.self_attn.out_proj.weight", "_orig_mod.decoder.layers.0.self_attn.out_proj.bias", "_orig_mod.decoder.layers.0.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.0.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.0.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.0.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.0.linear1.weight", "_orig_mod.decoder.layers.0.linear1.bias", "_orig_mod.decoder.layers.0.linear2.weight", "_orig_mod.decoder.layers.0.linear2.bias", "_orig_mod.decoder.layers.0.norm1.weight", "_orig_mod.decoder.layers.0.norm1.bias", "_orig_mod.decoder.layers.0.norm2.weight", "_orig_mod.decoder.layers.0.norm2.bias", "_orig_mod.decoder.layers.0.norm3.weight", "_orig_mod.decoder.layers.0.norm3.bias", "_orig_mod.decoder.layers.1.self_attn.in_proj_weight", "_orig_mod.decoder.layers.1.self_attn.in_proj_bias", "_orig_mod.decoder.layers.1.self_attn.out_proj.weight", "_orig_mod.decoder.layers.1.self_attn.out_proj.bias", "_orig_mod.decoder.layers.1.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.1.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.1.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.1.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.1.linear1.weight", "_orig_mod.decoder.layers.1.linear1.bias", "_orig_mod.decoder.layers.1.linear2.weight", "_orig_mod.decoder.layers.1.linear2.bias", "_orig_mod.decoder.layers.1.norm1.weight", "_orig_mod.decoder.layers.1.norm1.bias", "_orig_mod.decoder.layers.1.norm2.weight", "_orig_mod.decoder.layers.1.norm2.bias", "_orig_mod.decoder.layers.1.norm3.weight", "_orig_mod.decoder.layers.1.norm3.bias", "_orig_mod.decoder.layers.2.self_attn.in_proj_weight", "_orig_mod.decoder.layers.2.self_attn.in_proj_bias", "_orig_mod.decoder.layers.2.self_attn.out_proj.weight", "_orig_mod.decoder.layers.2.self_attn.out_proj.bias", "_orig_mod.decoder.layers.2.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.2.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.2.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.2.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.2.linear1.weight", "_orig_mod.decoder.layers.2.linear1.bias", "_orig_mod.decoder.layers.2.linear2.weight", "_orig_mod.decoder.layers.2.linear2.bias", "_orig_mod.decoder.layers.2.norm1.weight", "_orig_mod.decoder.layers.2.norm1.bias", "_orig_mod.decoder.layers.2.norm2.weight", "_orig_mod.decoder.layers.2.norm2.bias", "_orig_mod.decoder.layers.2.norm3.weight", "_orig_mod.decoder.layers.2.norm3.bias", "_orig_mod.type_head.weight", "_orig_mod.type_head.bias", "_orig_mod.p1_head.0.weight", "_orig_mod.p1_head.0.bias", "_orig_mod.p1_head.2.weight", "_orig_mod.p1_head.2.bias", "_orig_mod.p2_head.0.weight", "_orig_mod.p2_head.0.bias", "_orig_mod.p2_head.2.weight", "_orig_mod.p2_head.2.bias", "_orig_mod.curvature_head.weight", "_orig_mod.curvature_head.bias".
+
+============================================================
+ TESTING: golden_epoch_009.pt
+============================================================
+[ERROR] Critical failure testing golden_epoch_009.pt: Error(s) in loading state_dict for KnittingTransformer:
+        Missing key(s) in state_dict: "point_encoder.mlp.0.weight", "point_encoder.mlp.0.bias", "point_encoder.mlp.1.weight", "point_encoder.mlp.3.weight", "point_encoder.mlp.3.bias", "point_encoder.mlp.4.weight", "point_encoder.mlp.6.weight", "point_encoder.mlp.6.bias", "point_encoder.mlp.7.weight", "point_encoder.proj.weight", "point_encoder.proj.bias", "point_encoder.norm.weight", "point_encoder.norm.bias", "type_emb.weight", "p1_emb.weight", "p2_emb.weight", "pos_emb.weight", "row_emb.weight", "col_emb.weight", "parent_col_emb.weight", "decoder.layers.0.self_attn.in_proj_weight", "decoder.layers.0.self_attn.in_proj_bias", "decoder.layers.0.self_attn.out_proj.weight", "decoder.layers.0.self_attn.out_proj.bias", "decoder.layers.0.multihead_attn.in_proj_weight", "decoder.layers.0.multihead_attn.in_proj_bias", "decoder.layers.0.multihead_attn.out_proj.weight", "decoder.layers.0.multihead_attn.out_proj.bias", "decoder.layers.0.linear1.weight", "decoder.layers.0.linear1.bias", "decoder.layers.0.linear2.weight", "decoder.layers.0.linear2.bias", "decoder.layers.0.norm1.weight", "decoder.layers.0.norm1.bias", "decoder.layers.0.norm2.weight", "decoder.layers.0.norm2.bias", "decoder.layers.0.norm3.weight", "decoder.layers.0.norm3.bias", "decoder.layers.1.self_attn.in_proj_weight", "decoder.layers.1.self_attn.in_proj_bias", "decoder.layers.1.self_attn.out_proj.weight", "decoder.layers.1.self_attn.out_proj.bias", "decoder.layers.1.multihead_attn.in_proj_weight", "decoder.layers.1.multihead_attn.in_proj_bias", "decoder.layers.1.multihead_attn.out_proj.weight", "decoder.layers.1.multihead_attn.out_proj.bias", "decoder.layers.1.linear1.weight", "decoder.layers.1.linear1.bias", "decoder.layers.1.linear2.weight", "decoder.layers.1.linear2.bias", "decoder.layers.1.norm1.weight", "decoder.layers.1.norm1.bias", "decoder.layers.1.norm2.weight", "decoder.layers.1.norm2.bias", "decoder.layers.1.norm3.weight", "decoder.layers.1.norm3.bias", "decoder.layers.2.self_attn.in_proj_weight", "decoder.layers.2.self_attn.in_proj_bias", "decoder.layers.2.self_attn.out_proj.weight", "decoder.layers.2.self_attn.out_proj.bias", "decoder.layers.2.multihead_attn.in_proj_weight", "decoder.layers.2.multihead_attn.in_proj_bias", "decoder.layers.2.multihead_attn.out_proj.weight", "decoder.layers.2.multihead_attn.out_proj.bias", "decoder.layers.2.linear1.weight", "decoder.layers.2.linear1.bias", "decoder.layers.2.linear2.weight", "decoder.layers.2.linear2.bias", "decoder.layers.2.norm1.weight", "decoder.layers.2.norm1.bias", "decoder.layers.2.norm2.weight", "decoder.layers.2.norm2.bias", "decoder.layers.2.norm3.weight", "decoder.layers.2.norm3.bias", "type_head.weight", "type_head.bias", "p1_head.0.weight", "p1_head.0.bias", "p1_head.2.weight", "p1_head.2.bias", "p2_head.0.weight", "p2_head.0.bias", "p2_head.2.weight", "p2_head.2.bias", "curvature_head.weight", "curvature_head.bias".
+        Unexpected key(s) in state_dict: "_orig_mod.point_encoder.mlp.0.weight", "_orig_mod.point_encoder.mlp.0.bias", "_orig_mod.point_encoder.mlp.1.weight", "_orig_mod.point_encoder.mlp.3.weight", "_orig_mod.point_encoder.mlp.3.bias", "_orig_mod.point_encoder.mlp.4.weight", 
+"_orig_mod.point_encoder.mlp.6.weight", "_orig_mod.point_encoder.mlp.6.bias", "_orig_mod.point_encoder.mlp.7.weight", "_orig_mod.point_encoder.proj.weight", "_orig_mod.point_encoder.proj.bias", "_orig_mod.point_encoder.norm.weight", "_orig_mod.point_encoder.norm.bias", "_orig_mod.type_emb.weight", "_orig_mod.p1_emb.weight", "_orig_mod.p2_emb.weight", "_orig_mod.pos_emb.weight", "_orig_mod.row_emb.weight", "_orig_mod.col_emb.weight", "_orig_mod.parent_col_emb.weight", "_orig_mod.decoder.layers.0.self_attn.in_proj_weight", "_orig_mod.decoder.layers.0.self_attn.in_proj_bias", "_orig_mod.decoder.layers.0.self_attn.out_proj.weight", "_orig_mod.decoder.layers.0.self_attn.out_proj.bias", "_orig_mod.decoder.layers.0.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.0.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.0.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.0.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.0.linear1.weight", "_orig_mod.decoder.layers.0.linear1.bias", "_orig_mod.decoder.layers.0.linear2.weight", "_orig_mod.decoder.layers.0.linear2.bias", "_orig_mod.decoder.layers.0.norm1.weight", "_orig_mod.decoder.layers.0.norm1.bias", "_orig_mod.decoder.layers.0.norm2.weight", "_orig_mod.decoder.layers.0.norm2.bias", "_orig_mod.decoder.layers.0.norm3.weight", "_orig_mod.decoder.layers.0.norm3.bias", "_orig_mod.decoder.layers.1.self_attn.in_proj_weight", "_orig_mod.decoder.layers.1.self_attn.in_proj_bias", "_orig_mod.decoder.layers.1.self_attn.out_proj.weight", "_orig_mod.decoder.layers.1.self_attn.out_proj.bias", "_orig_mod.decoder.layers.1.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.1.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.1.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.1.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.1.linear1.weight", "_orig_mod.decoder.layers.1.linear1.bias", "_orig_mod.decoder.layers.1.linear2.weight", "_orig_mod.decoder.layers.1.linear2.bias", "_orig_mod.decoder.layers.1.norm1.weight", "_orig_mod.decoder.layers.1.norm1.bias", "_orig_mod.decoder.layers.1.norm2.weight", "_orig_mod.decoder.layers.1.norm2.bias", "_orig_mod.decoder.layers.1.norm3.weight", "_orig_mod.decoder.layers.1.norm3.bias", "_orig_mod.decoder.layers.2.self_attn.in_proj_weight", "_orig_mod.decoder.layers.2.self_attn.in_proj_bias", "_orig_mod.decoder.layers.2.self_attn.out_proj.weight", "_orig_mod.decoder.layers.2.self_attn.out_proj.bias", "_orig_mod.decoder.layers.2.multihead_attn.in_proj_weight", "_orig_mod.decoder.layers.2.multihead_attn.in_proj_bias", "_orig_mod.decoder.layers.2.multihead_attn.out_proj.weight", "_orig_mod.decoder.layers.2.multihead_attn.out_proj.bias", "_orig_mod.decoder.layers.2.linear1.weight", "_orig_mod.decoder.layers.2.linear1.bias", "_orig_mod.decoder.layers.2.linear2.weight", "_orig_mod.decoder.layers.2.linear2.bias", "_orig_mod.decoder.layers.2.norm1.weight", "_orig_mod.decoder.layers.2.norm1.bias", "_orig_mod.decoder.layers.2.norm2.weight", "_orig_mod.decoder.layers.2.norm2.bias", "_orig_mod.decoder.layers.2.norm3.weight", "_orig_mod.decoder.layers.2.norm3.bias", "_orig_mod.type_head.weight", "_orig_mod.type_head.bias", "_orig_mod.p1_head.0.weight", "_orig_mod.p1_head.0.bias", "_orig_mod.p1_head.2.weight", "_orig_mod.p1_head.2.bias", "_orig_mod.p2_head.0.weight", "_orig_mod.p2_head.0.bias", "_orig_mod.p2_head.2.weight", "_orig_mod.p2_head.2.bias", "_orig_mod.curvature_head.weight", "_orig_mod.curvature_head.bias".
+
+============================================================
+ TESTING: golden_epoch_033.pt
+============================================================
+Loaded checkpoint from epoch 33 (val_loss=?)
+[WARN] golden_epoch_033.pt has 61 validation errors.
+
+============================================================
+ TESTING: golden_epoch_034.pt
+============================================================
+Loaded checkpoint from epoch 34 (val_loss=?)
+[WARN] golden_epoch_034.pt has 15 validation errors.
+
+============================================================
+ TESTING: golden_epoch_035.pt
+============================================================
+Loaded checkpoint from epoch 35 (val_loss=?)
+[WARN] golden_epoch_035.pt has 2 validation errors.
+
+============================================================
+ TESTING: golden_epoch_047.pt
+============================================================
+Loaded checkpoint from epoch 47 (val_loss=?)
+[WARN] golden_epoch_047.pt has 11 validation errors.
+
+============================================================
+ TESTING: golden_epoch_048.pt
+============================================================
+Loaded checkpoint from epoch 48 (val_loss=?)
+[WARN] golden_epoch_048.pt has 16 validation errors.
+
+============================================================
+ TESTING: golden_epoch_049.pt
+============================================================
+Loaded checkpoint from epoch 49 (val_loss=?)
+[WARN] golden_epoch_049.pt has 48 validation errors.
+
+============================================================
+ TESTING: golden_epoch_060.pt
+============================================================
+Loaded checkpoint from epoch 60 (val_loss=?)
+[WARN] golden_epoch_060.pt has 83 validation errors.
+
+============================================================
+ TESTING: golden_epoch_061.pt
+============================================================
+Loaded checkpoint from epoch 61 (val_loss=?)
+[WARN] golden_epoch_061.pt has 77 validation errors.
+
+============================================================
+ TESTING: golden_epoch_062.pt
+============================================================
+Loaded checkpoint from epoch 62 (val_loss=?)
+[WARN] golden_epoch_062.pt has 101 validation errors.
+
+============================================================
+ TESTING: golden_epoch_074.pt
+============================================================
+Loaded checkpoint from epoch 74 (val_loss=?)
+[WARN] golden_epoch_074.pt has 86 validation errors.
+
+============================================================
+ TESTING: golden_epoch_075.pt
+============================================================
+Loaded checkpoint from epoch 75 (val_loss=?)
+[WARN] golden_epoch_075.pt has 125 validation errors.
+
+============================================================
+ TESTING: golden_epoch_076.pt
+============================================================
+Loaded checkpoint from epoch 76 (val_loss=?)
+[WARN] golden_epoch_076.pt has 104 validation errors.
+
+============================================================
+ TESTING: golden_epoch_093.pt
+============================================================
+Loaded checkpoint from epoch 93 (val_loss=?)
+[WARN] golden_epoch_093.pt has 87 validation errors.
+
+============================================================
+ TESTING: golden_epoch_094.pt
+============================================================
+Loaded checkpoint from epoch 94 (val_loss=?)
+[WARN] golden_epoch_094.pt has 107 validation errors.
+
+============================================================
+ TESTING: golden_epoch_095.pt
+============================================================
+Loaded checkpoint from epoch 95 (val_loss=?)
+[WARN] golden_epoch_095.pt has 90 validation errors.
+
+
+================================================================================
+                            BATCH VALIDATION SUMMARY
+================================================================================
+Checkpoint                | Status          | Stitches   | Tokens
+--------------------------|-----------------|------------|-----------
+golden_epoch_007.pt       | CRITICAL_ERROR  | 0          | 0
+golden_epoch_008.pt       | CRITICAL_ERROR  | 0          | 0
+golden_epoch_009.pt       | CRITICAL_ERROR  | 0          | 0
+golden_epoch_033.pt       | WARN (61 errors) | 200        | 195
+golden_epoch_034.pt       | WARN (15 errors) | 199        | 194
+golden_epoch_035.pt       | WARN (2 errors) | 305        | 300
+golden_epoch_047.pt       | WARN (11 errors) | 88         | 83
+golden_epoch_048.pt       | WARN (16 errors) | 93         | 88
+golden_epoch_049.pt       | WARN (48 errors) | 183        | 178
+golden_epoch_060.pt       | WARN (83 errors) | 305        | 300
+golden_epoch_061.pt       | WARN (77 errors) | 305        | 300
+golden_epoch_062.pt       | WARN (101 errors) | 305        | 300
+golden_epoch_074.pt       | WARN (86 errors) | 305        | 300
+golden_epoch_075.pt       | WARN (125 errors) | 305        | 300
+golden_epoch_076.pt       | WARN (104 errors) | 305        | 300
+golden_epoch_093.pt       | WARN (87 errors) | 305        | 300
+golden_epoch_094.pt       | WARN (107 errors) | 305        | 300
+golden_epoch_095.pt       | WARN (90 errors) | 305        | 300
+================================================================================
